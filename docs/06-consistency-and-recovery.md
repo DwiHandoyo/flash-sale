@@ -44,7 +44,7 @@ flowchart TD
 ```
 
 1. **Pause.** The recovery job sets `paused` in Redis, and the purchase script answers `sale_paused` (503). The pause must be explicit: after a failover, Redis still holds data, but it may be stale.
-2. **Drain.** Workers keep moving orders from RabbitMQ to PostgreSQL; they do not need Redis. No new orders arrive while the sale is paused, so the queue only shrinks. The job asks RabbitMQ's management API until waiting plus in-progress messages are 0 several times in a row. Shortcut: if PostgreSQL already holds `totalStock` orders, the job stops waiting.
+2. **Drain.** Workers keep moving orders from RabbitMQ to PostgreSQL; they do not need Redis. The job waits until no order is in flight, meaning none waits in the queue and none is held by a worker. Shortcut: if PostgreSQL already holds `totalStock` orders, the job stops waiting. See "How the job knows the queue is drained" below.
 3. **Check the dead letters.** Orders in the dead-letter queue are not in PostgreSQL. If the job ignored them, it would count too few sold units and could oversell. So when the queue is not empty, the job stops and raises an alarm.
 4. **Rebuild.** buyers = every order in PostgreSQL, and `remainingStock` = `totalStock` − number of orders.
 5. **Resume.** The job removes `paused`, and the sale continues.
@@ -59,11 +59,27 @@ While the job waits (for example because PostgreSQL is down too), the sale stays
 
 **What triggers recovery:**
 
-| Event                              | Recovery needed?                                                           |
-| ---------------------------------- | -------------------------------------------------------------------------- |
-| Redis restarts normally            | No. `appendfsync always` keeps the data intact                             |
-| Redis comes back empty (lost disk) | Yes. The sale data is missing, so the API already answers 503. Run the job |
-| Failover to a replica              | Yes. Replicas can lag behind, so treat it as data loss                     |
+| Event                              | Recovery needed?                                                                                                 |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Redis restarts normally            | No. `appendfsync always` keeps the data intact                                                                   |
+| Redis comes back empty (lost disk) | Yes. The sale data is missing, so the API already answers 503. Running the bootstrap job detects it and recovers |
+| Failover to a replica              | Yes. Replicas can lag behind, so treat it as data loss                                                           |
+
+### How the job knows the queue is drained
+
+Messages that wait in the queue are counted exactly, in real time, over AMQP. Messages a worker holds without having acknowledged them only show up in the management API, and its numbers are **sampled**. During testing, a quorum queue that held 2 messages still read 0 there for about 8 seconds with default settings. Trusting the first zero would rebuild Redis without those orders, and units could be sold twice.
+
+So the job relies on one fact instead: **once the sale is paused, the number of orders in flight can only go down.**
+
+- **Nothing new is published,** except by purchases decided just before the pause. Those are bounded by the 2 s publish timeout.
+- **Acks and dead-lettering remove messages, and a requeue moves a message without adding one.**
+
+The job therefore ignores all readings for a settle period after the pause (`DRAIN_SETTLE_MS`). That period must be longer than the age of the sampled counts plus the publish timeout. After it, the first reading of zero means the queue really is drained. The reconcile job skips publishing while the sale is paused, so it cannot refill the queue during recovery.
+
+| Setting                                   | Local (Docker Compose) | RabbitMQ defaults (e.g. Amazon MQ) |
+| ----------------------------------------- | ---------------------- | ---------------------------------- |
+| Statistics interval and quorum queue tick | 1 s each               | 5 s each                           |
+| `DRAIN_SETTLE_MS`                         | 5 s                    | About 15 s                         |
 
 ## Reconciliation at the end of the sale
 

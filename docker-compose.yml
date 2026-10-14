@@ -30,9 +30,11 @@ services:
     environment:
       RABBITMQ_DEFAULT_USER: flash
       RABBITMQ_DEFAULT_PASS: flash
-      # Erlang schedulers spin while idle by default; stop that so the broker does not burn the
-      # CPU that the API and the stress-test generator share on a laptop.
-      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: '+sbwt none +sbwtdcpu none +sbwtdio none'
+      # +sbwt...: Erlang schedulers spin while idle by default; stop that so the broker does not
+      # burn the CPU that the API and the stress-test generator share on a laptop.
+      # collect_statistics_interval and quorum_tick_interval: the management API's queue counts
+      # are sampled, by default every 5 s. The recovery job reads them, so refresh every second.
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: '+sbwt none +sbwtdcpu none +sbwtdio none -rabbit collect_statistics_interval 1000 -rabbit quorum_tick_interval 1000'
     ports:
       - '${RABBITMQ_HOST_PORT:-5672}:5672'
       - '${RABBITMQ_DASHBOARD_HOST_PORT:-15672}:15672'
