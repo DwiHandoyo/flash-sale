@@ -1,0 +1,25 @@
+{
+  "name": "@flash-sale/api",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Flash sale HTTP API: decides purchases in Redis and hands orders to RabbitMQ",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc",
+    "test": "vitest run --project unit",
+    "test:integration": "vitest run --project integration"
+  },
+  "dependencies": {
+    "@fastify/under-pressure": "^9.2.1",
+    "@flash-sale/shared": "*",
+    "fastify": "^5.12.6",
+    "ioredis": "^5.11.1"
+  },
+  "devDependencies": {
+    "amqplib": "^2.2.0",
+    "pino": "^10.4.0",
+    "undici": "^8.11.2"
+  }
+}

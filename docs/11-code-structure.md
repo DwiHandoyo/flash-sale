@@ -30,14 +30,16 @@ docker-compose.yml
 
 ### What goes into `shared`
 
-| Module (`@flash-sale/shared/…`)                    | Used by                                                      | Why it is shared                           |
-| -------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------ |
-| `order`: order type, message format and validation | `api` sends it, `worker` receives it, `jobs` re-publishes it | Sender and receiver cannot disagree        |
-| `sale`: the sale definition type                   | All backend apps                                             | One shape for the sale                     |
-| `redis-keys`: key names and buyer record format    | `api`, `jobs`                                                | Both read and write the same keys          |
-| `rabbitmq`: queue names and settings               | `api`, `worker`, `jobs`                                      | One definition of the topology             |
-| PostgreSQL schema and repositories                 | `worker`, `jobs`                                             | SQL lives in one place                     |
-| `config` helpers and `logger`                      | All backend apps                                             | Validated once, in the same way everywhere |
+| Module (`@flash-sale/shared/…`)                                       | Used by                                                      | Why it is shared                           |
+| --------------------------------------------------------------------- | ------------------------------------------------------------ | ------------------------------------------ |
+| `order`: order type, message format and validation                    | `api` sends it, `worker` receives it, `jobs` re-publishes it | Sender and receiver cannot disagree        |
+| `sale`: the sale definition type                                      | All backend apps                                             | One shape for the sale                     |
+| `redis-keys`: key names and buyer record format                       | `api`, `jobs`                                                | Both read and write the same keys          |
+| `rabbitmq`: queue names and settings                                  | `api`, `worker`, `jobs`                                      | One definition of the topology             |
+| `order-publisher`: publishing with confirms                           | `api` (new orders), `jobs` (re-publishing)                   | One implementation of "stored safely"      |
+| `redis-client`: connection set-up                                     | `api`, `jobs`                                                | Same retry and fail-fast behaviour         |
+| PostgreSQL schema and repositories                                    | `worker`, `jobs`                                             | SQL lives in one place                     |
+| `config` helpers, `logger`, `errors`, `lifecycle` (graceful shutdown) | All backend apps                                             | Validated once, in the same way everywhere |
 
 **Rule:** code moves into `shared` only when a second app needs it. That is why the purchase rules stay in the `api` app: the sale status and the user ID normalisation are only ever used there.
 
@@ -79,12 +81,12 @@ The API app, for example:
 
 ```
 apps/api/src/
-  app/          purchase.ts, get-sale-status.ts, get-purchase.ts, ports.ts
+  domain/       sale status, user ID rules, purchase outcomes (no I/O)
+  app/          use-cases.ts (getSaleStatus, purchase, getPurchase), ports.ts, errors, status cache
   adapters/
     http/       routes, JSON schemas, mapping outcomes to HTTP status codes
-    redis/      sale store and the Lua script
-    rabbitmq/   order publisher (waits for the confirm)
-  main.ts       composition root
+    redis/      sale store and the Lua reserve script
+  main.ts       composition root (the RabbitMQ publisher comes from shared)
 ```
 
 ## Patterns we use

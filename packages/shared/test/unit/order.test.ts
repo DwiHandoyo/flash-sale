@@ -5,7 +5,7 @@ import {
   encodeOrderMessage,
   InvalidOrderMessageError,
   type OrderMessage,
-} from '../src/order';
+} from '../../src/order';
 
 const message: OrderMessage = {
   orderId: '0b6f8a52-5d0e-4f43-9f5e-6f1f4e3c9a10',

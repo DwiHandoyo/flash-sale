@@ -8,7 +8,7 @@ import {
   readServiceUrl,
   readString,
   readTimestamp,
-} from '../src/config';
+} from '../../src/config';
 
 describe('config helpers', () => {
   it('fall back to defaults when a variable is missing or empty', () => {

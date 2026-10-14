@@ -19,6 +19,16 @@ export default defineConfig(
     rules: {
       '@typescript-eslint/consistent-type-imports': 'error',
       '@typescript-eslint/no-floating-promises': 'error',
+      // Async functions without `await` are the normal shape of Fastify plugins and handlers.
+      '@typescript-eslint/require-await': 'off',
+    },
+  },
+  {
+    // Vitest's asymmetric matchers (expect.any(...)) are typed `any`.
+    files: ['**/test/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-unsafe-assignment': 'off',
+      '@typescript-eslint/no-unsafe-member-access': 'off',
     },
   },
   {

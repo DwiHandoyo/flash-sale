@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { decodeBuyerRecord, encodeBuyerRecord, saleKeys } from '../src/redis-keys';
+import { decodeBuyerRecord, encodeBuyerRecord, saleKeys } from '../../src/redis-keys';
 
 describe('saleKeys', () => {
   it('puts every key of a sale in the same Redis Cluster hash tag', () => {
