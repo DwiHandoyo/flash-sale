@@ -1,6 +1,124 @@
 name: flash-sale
 
+# `docker compose up --build` starts everything; the web app is then on http://localhost:8080.
+# `npm run infra:up` starts only Redis, RabbitMQ and PostgreSQL, for development and tests.
+# See docs/10-infrastructure.md.
+
+# Connection settings, written once. Each app gets only the connections it uses.
+x-connections:
+  redis: &redis-url redis://redis:6379
+  rabbitmq: &rabbitmq-url amqp://flash:flash@rabbitmq:5672
+  rabbitmq-management: &rabbitmq-management-url http://flash:flash@rabbitmq:15672
+  postgres: &database-url postgres://flash:flash@postgres:5432/flash_sale
+
+# What every long-running app service has in common.
+x-app: &app
+  restart: unless-stopped
+  # A minimal init process as PID 1 passes signals on to Node.js, for a graceful shutdown.
+  init: true
+  # Longer than the apps' own 10-second shutdown limit.
+  stop_grace_period: 15s
+
+x-jobs: &jobs
+  build: { context: ., target: jobs }
+  init: true
+  environment:
+    LOG_LEVEL: ${LOG_LEVEL:-info}
+    SALE_ID: &sale-id ${SALE_ID:-limited-edition-drop}
+    # Used only when the sale is created for the first time (see `reset` to change it later).
+    SALE_TOTAL_STOCK: ${SALE_TOTAL_STOCK:-100}
+    SALE_STARTS_AT: ${SALE_STARTS_AT:-}
+    SALE_ENDS_AT: ${SALE_ENDS_AT:-}
+    SALE_START_DELAY_SECONDS: ${SALE_START_DELAY_SECONDS:-30}
+    SALE_DURATION_SECONDS: ${SALE_DURATION_SECONDS:-3600}
+    REDIS_URL: *redis-url
+    RABBITMQ_URL: *rabbitmq-url
+    RABBITMQ_MANAGEMENT_URL: *rabbitmq-management-url
+    DATABASE_URL: *database-url
+  depends_on:
+    redis: { condition: service_healthy }
+    rabbitmq: { condition: service_healthy }
+    postgres: { condition: service_healthy }
+
 services:
+  # ---- Application ------------------------------------------------------------------------------
+
+  # Runs once at every start-up, before the API: tables, the sale, the queues, Redis in sync.
+  bootstrap:
+    <<: *jobs
+    command: ['bootstrap']
+    restart: 'no'
+
+  api:
+    <<: *app
+    build: { context: ., target: api }
+    deploy:
+      replicas: 3
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      SALE_ID: *sale-id
+      REDIS_URL: *redis-url
+      RABBITMQ_URL: *rabbitmq-url
+    healthcheck:
+      test: ['CMD', 'wget', '-qO-', 'http://127.0.0.1:3000/health/ready']
+      interval: 5s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    depends_on:
+      bootstrap: { condition: service_completed_successfully }
+
+  worker:
+    <<: *app
+    build: { context: ., target: worker }
+    deploy:
+      replicas: 2
+    environment:
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      RABBITMQ_URL: *rabbitmq-url
+      DATABASE_URL: *database-url
+    depends_on:
+      bootstrap: { condition: service_completed_successfully }
+
+  # Local stand-in for EventBridge Scheduler: reconciles at endsAt and 5 minutes later.
+  scheduler:
+    <<: [*jobs, *app]
+    command: ['schedule']
+    depends_on:
+      bootstrap: { condition: service_completed_successfully }
+
+  # nginx: the React build plus a load balancer over the API servers.
+  web:
+    <<: *app
+    build: { context: ., target: web }
+    ports:
+      - '${WEB_HOST_PORT:-8080}:8080'
+    healthcheck:
+      test: ['CMD', 'wget', '-qO', '/dev/null', 'http://127.0.0.1:8080/']
+      interval: 5s
+      timeout: 3s
+      retries: 3
+    depends_on:
+      api: { condition: service_healthy }
+
+  # The other jobs, run by hand, for example:
+  #   docker compose run --rm jobs reset --stock 100 --starts-in 10 --duration 600
+  #   docker compose run --rm jobs recover
+  jobs:
+    <<: *jobs
+    profiles: ['manual']
+
+  # The stress-test load generator, started by `npm run stress` (tools/stress, docs/09). It runs
+  # inside the Docker network so that Docker's port forwarding on macOS is not the bottleneck.
+  stress:
+    build: { context: ., target: stress }
+    profiles: ['manual']
+    init: true
+    environment:
+      TARGET_URL: http://web:8080
+
+  # ---- Infrastructure ---------------------------------------------------------------------------
+
   redis:
     image: redis:8.2-alpine
     # Every write is synced to disk before Redis replies (see docs/07-decisions.md, D7).

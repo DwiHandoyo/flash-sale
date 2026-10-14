@@ -17,7 +17,9 @@ tools/
 infra/
   postgres/   Local database set-up (creates the test database)
   aws/        Production infrastructure as code: a design, not deployed
+scripts/      bundle.js: bundles a backend app into one file for its image
 docs/         These documents
+Dockerfile    One target per app
 docker-compose.yml
 ```
 

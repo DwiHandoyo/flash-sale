@@ -83,7 +83,7 @@
 
 **Why it is affordable here.** Only winners write, so there are at most `stock` writes in the whole sale. Over 99% of requests (sold out, already bought, not started, status) only read and never touch the disk.
 
-**Why it is still worth it with RabbitMQ.** Orders are safe in RabbitMQ either way. But syncing only once per second could lose about a second of reservations in a crash. Redis would then believe those units are still available, and every restart would need the recovery procedure. With `always`, a restart needs nothing.
+**Why it is still worth it with RabbitMQ.** Orders are safe in RabbitMQ either way. But syncing only once per second could lose up to a second of reservations if the machine crashes. A crash of the Redis process alone loses nothing, because Redis hands every write to the operating system before it replies. Redis would then believe those units are still available, and every restart would need the recovery procedure. With `always`, a restart needs nothing.
 
 We measure both settings in the stress test.
 

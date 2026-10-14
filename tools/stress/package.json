@@ -1,0 +1,23 @@
+{
+  "name": "@flash-sale/stress",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Stress and chaos tests for the whole system in Docker (not deployed)",
+  "type": "module",
+  "scripts": {
+    "stress": "tsx src/run.ts",
+    "build": "node ../../scripts/bundle.js src/load.ts",
+    "typecheck": "tsc",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@flash-sale/shared": "*",
+    "amqplib": "^2.2.0",
+    "ioredis": "^5.11.1",
+    "pg": "^8.23.1",
+    "undici": "^8.11.2"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1"
+  }
+}

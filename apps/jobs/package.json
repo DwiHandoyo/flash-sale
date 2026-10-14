@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "jobs": "tsx src/main.ts",
+    "build": "node ../../scripts/bundle.js",
     "typecheck": "tsc",
     "test": "vitest run --project unit",
     "test:integration": "vitest run --project integration"

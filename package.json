@@ -19,6 +19,7 @@
     "format": "prettier --write .",
     "test": "npm run test --workspaces --if-present",
     "test:integration": "npm run test:integration --workspaces --if-present",
+    "stress": "tsx tools/stress/src/run.ts",
     "infra:up": "docker compose up -d --wait redis rabbitmq postgres",
     "infra:down": "docker compose down"
   },

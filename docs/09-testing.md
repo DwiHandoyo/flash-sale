@@ -18,29 +18,49 @@ An integration test runs a naive "read the stock, then decrement it" version und
 
 ## Stress test
 
-**Scenario.** Thousands of users (for example 10,000, some of them double-clicking) press "Buy" the moment the sale opens. Their requests go through nginx to three API servers.
+**Run it** with `npm run stress` (Docker and `npm ci` are all it needs). It builds and starts the whole system, resets the sale, runs the load from a container inside the Docker network, then checks the data stores. It exits with code 1 when a check fails.
 
-**Verification.** Afterwards the test waits for RabbitMQ to drain, then checks Redis and PostgreSQL directly instead of trusting the API's own answers:
+| Option           | Default                              | Meaning                                              |
+| ---------------- | ------------------------------------ | ---------------------------------------------------- |
+| `--users`        | 10,000                               | Users who press "Buy"                                |
+| `--stock`        | 100 (with `--chaos`: half the users) | Units on sale                                        |
+| `--connections`  | 500                                  | Users waiting for an answer at the same moment       |
+| `--double-click` | 0.1                                  | Share of users who click twice                       |
+| `--chaos`        | none                                 | A fault to inject during the run (see Chaos runs)    |
+| `--chaos-after`  | 1000                                 | When to inject it, in milliseconds after the opening |
 
-| Check                                            | What it means                         |
-| ------------------------------------------------ | ------------------------------------- |
-| Exactly `min(stock, users)` units sold           | No overselling and no underselling    |
-| At most one order per user                       | "One per user" held under concurrency |
-| `remainingStock` + buyers = `totalStock`         | No stock was created or lost          |
-| Every `201` response has its order in PostgreSQL | "You got it" was never lost           |
-| Every order falls inside the sale window         | The window was enforced               |
+Example: `npm run stress -- --users 20000 --stock 500`.
 
-**Report.** Throughput (requests per second), latency (p50, p95, p99) and error counts. The test runs twice, with Redis on `appendfsync always` and on `everysec`, to measure what D7 costs.
+**Scenario.** All users press "Buy" the moment the sale opens, and some of them click twice. Their requests go through nginx to three API servers. A user who gets a 5xx answer or no answer tries again up to three times, as a person would.
+
+**Verification.** Afterwards the test waits until the workers have saved every order. If a reservation still has no order, because its publish was never confirmed, the test runs reconciliation, as the scheduler does at `endsAt`, and waits again. Then it checks Redis, PostgreSQL and RabbitMQ directly instead of trusting the API's own answers:
+
+| Check                                                 | What it means                                                   |
+| ----------------------------------------------------- | --------------------------------------------------------------- |
+| Exactly `min(stock, users)` units sold                | No overselling and no underselling                              |
+| At most one order per user                            | "One per user" held, and no user was given two different orders |
+| `remainingStock` + buyers = `totalStock`              | No stock was created or lost                                    |
+| Every "you got it" answer has its order in PostgreSQL | A confirmed purchase was never lost                             |
+| Redis buyers and PostgreSQL orders match              | The two stores agree                                            |
+| `sold_count` matches the order rows                   | The database guard counted correctly                            |
+| Every order falls inside the sale window              | The window was enforced                                         |
+| Order queue drained, dead-letter queue empty          | No order is stuck or rejected                                   |
+
+**Report.** The number of answers per outcome, throughput, latency (p50, p95, p99, max), and the answers per second, which shows what a fault did and when.
+
+**`appendfsync always` vs `everysec` (D7).** `REDIS_APPENDFSYNC=everysec npm run stress` restarts Redis with `everysec`; the next plain `npm run stress` switches it back. This measures what `always` costs. It cannot show what `everysec` risks: with both settings, Redis hands each write to the operating system before it replies, so only a crash of the machine itself loses data under `everysec`, and killing a container is not such a crash.
 
 ## Chaos runs
 
-| Fault injected during the stress test | Expected result                                           |
-| ------------------------------------- | --------------------------------------------------------- |
-| Kill one API server                   | Every check passes. A few requests fail and are retried   |
-| Kill a worker before it acknowledges  | Its messages are redelivered. No duplicates in PostgreSQL |
-| Stop PostgreSQL for 10 s              | Sales continue. PostgreSQL catches up afterwards          |
-| Restart Redis                         | Data is intact. Sales continue after a brief 503          |
-| Wipe Redis, then run the recovery job | The sale pauses, rebuilds and resumes, with no oversell   |
+`npm run stress -- --chaos <fault>` runs the same test with a fault injected one second after the opening. Every check still has to pass.
+
+| `--chaos`       | Fault                                                              | Expected result                                                                                                                                                     |
+| --------------- | ------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `kill-api`      | An API server's process is killed; Docker restarts it              | nginx retries its requests on the other servers. All checks pass                                                                                                    |
+| `kill-worker`   | A worker's process is killed while it holds unacknowledged orders  | Its messages are redelivered to the other worker. No duplicates in PostgreSQL                                                                                       |
+| `stop-postgres` | PostgreSQL is stopped for 10 s                                     | Sales continue. The workers wait, then catch up                                                                                                                     |
+| `restart-redis` | Redis is killed and started again 2 s later                        | Data is intact thanks to the append-only file. Sales continue after brief 503s                                                                                      |
+| `wipe-redis`    | Redis loses all data; the `recover` job runs, as an operator would | The sale pauses, rebuilds from PostgreSQL and resumes, with no oversell. Some stock may stay unsold, so the first check becomes "no more units sold than the stock" |
 
 ---
 

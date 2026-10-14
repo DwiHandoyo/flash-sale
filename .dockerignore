@@ -1,0 +1,14 @@
+**/node_modules
+**/dist
+**/coverage
+**/*.log
+.git
+.env
+.DS_Store
+docs
+infra/aws
+# Not needed inside an image; leaving them out keeps the build cache valid when they change.
+**/*.md
+Dockerfile
+.dockerignore
+docker-compose.yml

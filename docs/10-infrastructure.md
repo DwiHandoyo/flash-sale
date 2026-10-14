@@ -23,7 +23,7 @@ We invest in speed where the load is (API and Redis) and in reliability where th
 
 | Service     | Image                               | Copies    | Key settings                                                                                                                                          | Host port               |
 | ----------- | ----------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| `web`       | nginx 1.28 + the React build        | 1         | Load balances over the API servers; retries a failed request on another server                                                                        | 8080                    |
+| `web`       | nginx 1.30 + the React build        | 1         | Load balances over the API servers; retries a failed request on another server                                                                        | 8080                    |
 | `api`       | `api` app on Node 24 LTS            | 3         | Stateless, health check on `/health/ready`                                                                                                            | —                       |
 | `worker`    | `worker` app on Node 24 LTS         | 2         | RabbitMQ consumer with manual acks                                                                                                                    | —                       |
 | `bootstrap` | `jobs` app on Node 24 LTS           | Runs once | Creates tables, the sale and the RabbitMQ queues, then reconciles. The other jobs (`reconcile`, `recover`, `reset`) run from the same image on demand | —                       |
@@ -35,7 +35,9 @@ We invest in speed where the load is (API and Redis) and in reliability where th
 - **Host ports for Redis and PostgreSQL are not the defaults** (6379, 5432), so they do not clash with copies already installed on the reviewer's machine.
 - **All data lives in Docker volumes,** so it survives container restarts.
 - **The RabbitMQ topology is created in code** by the bootstrap job, not set up by hand.
-- **Each app has its own image,** built in multiple stages and run as a non-root user.
+- **Each app has its own image,** built from one [`Dockerfile`](../Dockerfile) with a target per app, and run as a non-root user.
+- **Backend images carry no `node_modules`.** esbuild bundles each backend app, its dependencies included, into one file ([`scripts/bundle.js`](../scripts/bundle.js)). The image holds Node.js and that file. The worker's Lambda package in production is the same kind of bundle.
+- **The other jobs run on demand** from the same image, for example `docker compose run --rm jobs reset --stock 100 --starts-in 10` or `docker compose run --rm jobs recover`.
 
 ## Production
 
@@ -118,6 +120,7 @@ await scheduler.send(
 
 ## Stress test setup
 
+- **`npm run stress` runs it,** with the load generator as the `stress` service. See [Testing](09-testing.md) for the options and the checks.
 - **The load generator runs inside the Docker network,** not from the laptop through Docker's published ports. On macOS, Docker Desktop's port forwarding can become a bottleneck of its own and distort the results.
 - **The generator and the system share the same laptop CPU,** so throughput numbers are relative, not a capacity promise. The README states this next to the results.
 

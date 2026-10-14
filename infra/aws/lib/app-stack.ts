@@ -81,7 +81,7 @@ export class AppStack extends Stack {
       taskSubnets: appSubnets,
       publicLoadBalancer: true,
       taskImageOptions: {
-        image: ecs.ContainerImage.fromAsset(repoRoot, { file: 'apps/api/Dockerfile' }),
+        image: ecs.ContainerImage.fromAsset(repoRoot, { target: 'api' }),
         containerPort: 3000,
         environment: {
           REDIS_URL: endpoints.REDIS_URL,
@@ -201,7 +201,7 @@ export class AppStack extends Stack {
     );
 
     jobsTask.addContainer('jobs', {
-      image: ecs.ContainerImage.fromAsset(repoRoot, { file: 'apps/jobs/Dockerfile' }),
+      image: ecs.ContainerImage.fromAsset(repoRoot, { target: 'jobs' }),
       // Overridden per run: bootstrap, recover, reset.
       command: ['bootstrap'],
       logging: ecs.LogDrivers.awsLogs({ streamPrefix: 'jobs' }),
