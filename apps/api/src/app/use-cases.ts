@@ -44,9 +44,10 @@ export function createUseCases(deps: UseCaseDependencies): UseCases {
     async purchase(rawUserId) {
       const userId = normalizeUserId(rawUserId);
 
-      // Nobody can own an order before the sale opens, so "not started" is certain without asking
-      // Redis. This absorbs the button-mashing before opening; every other decision is atomic in
-      // Redis.
+      // Nobody can own an order before the sale opens, so "not started" needs no trip to Redis.
+      // This absorbs the button-mashing before opening; every other decision is atomic in Redis.
+      // It uses this server's clock: one that runs behind delays the opening by its error, but
+      // can never open the sale early (docs/07, D6).
       const state = await saleState.get();
       if (state && !state.paused && clock() < state.startsAt) return { kind: 'not_started' };
 

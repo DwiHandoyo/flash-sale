@@ -2,13 +2,13 @@
 
 > **In short:** three endpoints for the app, plus two for health checks. All responses are JSON. Every purchase answer carries a machine-readable `code`, so the frontend never has to parse a message.
 
-| Method | Path                     | Purpose                                                                 |
-| ------ | ------------------------ | ----------------------------------------------------------------------- |
-| GET    | `/api/sale`              | Sale status                                                             |
-| POST   | `/api/purchases`         | Try to buy                                                              |
-| GET    | `/api/purchases/:userId` | Did this user get one?                                                  |
-| GET    | `/health/live`           | Is the process up?                                                      |
-| GET    | `/health/ready`          | Are Redis and RabbitMQ reachable? Used to take a server out of rotation |
+| Method | Path                     | Purpose                                                                                                                                                        |
+| ------ | ------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/api/sale`              | Sale status                                                                                                                                                    |
+| POST   | `/api/purchases`         | Try to buy                                                                                                                                                     |
+| GET    | `/api/purchases/:userId` | Did this user get one?                                                                                                                                         |
+| GET    | `/health/live`           | Is the process up?                                                                                                                                             |
+| GET    | `/health/ready`          | Are Redis and RabbitMQ reachable? In production the load balancer takes a server out of rotation when not; locally, Compose waits for it before starting nginx |
 
 ## GET /api/sale
 
@@ -25,7 +25,7 @@
 ```
 
 - `status` is one of `upcoming`, `active`, `sold_out`, `ended` or `paused`.
-- `serverTime` lets the app run an accurate countdown even when the device clock is wrong.
+- `serverTime` lets the app run an accurate countdown even when the device clock is wrong. It and `status` come from the API server's clock; the purchase itself is decided by Redis's clock (see [Decisions](07-decisions.md), D6).
 - The response carries `Cache-Control: public, max-age=1`, so a CDN could absorb the polling.
 
 ## POST /api/purchases
@@ -36,17 +36,21 @@ Request:
 { "userId": "alice@example.com" }
 ```
 
-| HTTP | `code`                           | Meaning                                                                          | Includes `order`? |
-| ---- | -------------------------------- | -------------------------------------------------------------------------------- | ----------------- |
-| 201  | `purchased`                      | You got one                                                                      | Yes               |
-| 409  | `already_purchased`              | You already have one                                                             | Yes, the original |
-| 409  | `sold_out`                       | No stock left                                                                    | No                |
-| 409  | `sale_not_started`               | Too early                                                                        | No                |
-| 409  | `sale_ended`                     | Too late                                                                         | No                |
-| 400  | `invalid_user_id`, `bad_request` | Fix the input                                                                    | No                |
-| 503  | `sale_paused`                    | The sale is paused for recovery. Try again shortly                               | No                |
-| 503  | `service_unavailable`            | Redis or RabbitMQ did not answer. The purchase may have happened, so check first | No                |
-| 503  | `overloaded`                     | The server is busy. Try again shortly                                            | No                |
+| HTTP | `code`                           | Meaning                                                                                         | Includes `order`? | `Retry-After` |
+| ---- | -------------------------------- | ----------------------------------------------------------------------------------------------- | ----------------- | ------------- |
+| 201  | `purchased`                      | You got one                                                                                     | Yes               |               |
+| 409  | `already_purchased`              | You already have one                                                                            | Yes, the original |               |
+| 409  | `sold_out`                       | No stock left                                                                                   | No                |               |
+| 409  | `sale_not_started`               | Too early                                                                                       | No                |               |
+| 409  | `sale_ended`                     | Too late                                                                                        | No                |               |
+| 400  | `invalid_user_id`, `bad_request` | Fix the input                                                                                   | No                |               |
+| 503  | `sale_paused`                    | The sale is paused for recovery. Try again shortly                                              | No                | 2 s           |
+| 503  | `sale_not_initialized`           | Redis holds no sale: bootstrap has not run yet, or Redis lost its data and recovery is starting | No                | 5 s           |
+| 503  | `service_unavailable`            | Redis or RabbitMQ did not answer. The purchase may have happened, so check first                | No                | 1 s           |
+| 503  | `overloaded`                     | The server is busy. Try again shortly                                                           | No                | 1 s           |
+| 500  | `internal_error`                 | An unexpected error. Try again                                                                  | No                |               |
+
+An unknown path answers `404 not_found`. The `sale_not_initialized`, `service_unavailable`, `overloaded` and `internal_error` answers can come from every endpoint, not only from purchases.
 
 Example of a successful purchase:
 
@@ -80,7 +84,7 @@ Example of a successful purchase:
 { "userId": "bob", "purchased": false }
 ```
 
-While the sale is paused for recovery, this endpoint answers `503 sale_paused`, because Redis may not have its buyers back yet.
+While the sale is paused for recovery, this endpoint answers `503 sale_paused`, because Redis may not have its buyers back yet. While Redis holds no sale at all, it answers `503 sale_not_initialized`.
 
 ## User IDs
 

@@ -18,7 +18,7 @@
  */
 import { fileURLToPath } from 'node:url';
 
-import { Duration, Fn, RemovalPolicy, Stack, Token, type StackProps } from 'aws-cdk-lib';
+import { Duration, RemovalPolicy, Stack, Token, type StackProps } from 'aws-cdk-lib';
 import * as cloudfront from 'aws-cdk-lib/aws-cloudfront';
 import * as origins from 'aws-cdk-lib/aws-cloudfront-origins';
 import * as cloudwatch from 'aws-cdk-lib/aws-cloudwatch';
@@ -57,13 +57,18 @@ export class AppStack extends Stack {
     const name = `flash-sale-${config.name}`;
     const appSubnets = { subnetType: ec2.SubnetType.PRIVATE_WITH_EGRESS };
 
-    // Same variables as docker-compose.yml, pointing at the managed services.
+    // The variables the apps read (each app's config.ts), pointing at the managed services. The
+    // user names are in the URLs; the passwords come from Secrets Manager as REDIS_PASSWORD,
+    // RABBITMQ_PASSWORD and DATABASE_PASSWORD, and the apps add them to the URLs.
+    const mqHost = `${data.rabbitMq.attrId}.mq.${this.region}.amazonaws.com`;
     const endpoints = {
       SALE_ID: 'limited-edition-drop',
       LOG_LEVEL: 'info',
-      REDIS_URL: `rediss://${data.redis.attrClusterEndpointAddress}:${Token.asString(data.redis.attrClusterEndpointPort)}`,
-      RABBITMQ_URL: Fn.select(0, data.rabbitMq.attrAmqpEndpoints),
-      DATABASE_HOST: data.postgresProxy.endpoint,
+      REDIS_URL: `rediss://flash-sale@${data.redis.attrClusterEndpointAddress}:${Token.asString(data.redis.attrClusterEndpointPort)}`,
+      RABBITMQ_URL: `amqps://flash-sale@${mqHost}:5671`,
+      // The recovery job reads the queue counts from RabbitMQ's management API.
+      RABBITMQ_MANAGEMENT_URL: `https://flash-sale@${mqHost}`,
+      DATABASE_URL: `postgres://flash_sale@${data.postgresProxy.endpoint}:5432/flash_sale`,
     };
 
     const cluster = new ecs.Cluster(this, 'Cluster', {
@@ -120,7 +125,7 @@ export class AppStack extends Stack {
       vpcSubnets: appSubnets,
       securityGroups: [sg.worker],
       environment: {
-        DATABASE_HOST: endpoints.DATABASE_HOST,
+        DATABASE_URL: endpoints.DATABASE_URL,
         DATABASE_SECRET_ARN: data.postgresSecret.secretArn,
       },
     });
@@ -219,7 +224,6 @@ export class AppStack extends Stack {
       secrets: {
         REDIS_PASSWORD: ecs.Secret.fromSecretsManager(data.redisSecret, 'password'),
         RABBITMQ_PASSWORD: ecs.Secret.fromSecretsManager(data.rabbitMqSecret, 'password'),
-        DATABASE_USER: ecs.Secret.fromSecretsManager(data.postgresSecret, 'username'),
         DATABASE_PASSWORD: ecs.Secret.fromSecretsManager(data.postgresSecret, 'password'),
       },
     });

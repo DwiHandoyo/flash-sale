@@ -19,7 +19,7 @@
 | Queue                | Kind                                           | Content                                                             | Settings                                                                                                                          |
 | -------------------- | ---------------------------------------------- | ------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | `orders`             | Durable quorum queue (replicated in a cluster) | One message per order: `orderId`, `saleId`, `userId`, `purchasedAt` | Persistent messages, publisher confirms, manual consumer acks. After 10 failed deliveries a message goes to the dead-letter queue |
-| `orders.dead-letter` | Durable queue                                  | Orders that could not be saved                                      | Monitored. The recovery job refuses to run while this queue is not empty                                                          |
+| `orders.dead-letter` | Durable quorum queue                           | Orders that could not be saved                                      | Monitored. The recovery job stops before rebuilding Redis while this queue is not empty, and the sale stays paused                |
 
 - **Each message's ID is its order ID,** so a message published twice is easy to recognise.
 - **The queues are declared in code.** The bootstrap job and the worker both declare them on start-up, which is safe because declaring is idempotent.
@@ -35,6 +35,7 @@ erDiagram
         int sold_count
         timestamptz starts_at
         timestamptz ends_at
+        timestamptz created_at
     }
     orders {
         uuid order_id PK
@@ -46,21 +47,22 @@ erDiagram
 ```
 
 - `UNIQUE (sale_id, user_id)` enforces "one per user" a second time, independently of Redis.
+- `sales` also checks `total_stock >= 0` and `ends_at > starts_at`. Deleting a sale deletes its orders (`ON DELETE CASCADE`), which only the demo reset does.
 - `order_id` is the primary key, so saving the same order twice changes nothing.
 - `sold_count` has the rule `CHECK (sold_count <= total_stock)` and is increased in the same transaction as the insert. It is a last guard against overselling. See [Consistency and recovery](06-consistency-and-recovery.md).
 - `purchased_at` comes from Redis and `persisted_at` from PostgreSQL. The difference shows how far behind the workers are.
 
 ## Lifecycle
 
-| Step                            | When                                                              | What happens                                                                                                                                                                                    |
-| ------------------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Preparation** (bootstrap job) | Every start-up, and in production also 10 minutes before the sale | Creates the tables and the sale (first time only), and the RabbitMQ queues. Loads the buyers from PostgreSQL and sets `remainingStock` = `totalStock` − orders. Safe to run any number of times |
-| **During the sale**             | Between `startsAt` and `endsAt`                                   | Redis decides, orders travel through RabbitMQ, and workers save them into PostgreSQL                                                                                                            |
-| **Reconciliation**              | At `endsAt`                                                       | Publishes any reservation that has no order record yet. See [Infrastructure](10-infrastructure.md#scheduling) for what triggers it                                                              |
-| **Recovery**                    | Only after Redis loses data                                       | See [Consistency and recovery](06-consistency-and-recovery.md)                                                                                                                                  |
-| **Reset**                       | Demos and stress tests only                                       | Deletes buyers, orders and queued messages, then restarts the sale with full stock                                                                                                              |
+| Step                            | When                                                              | What happens                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| ------------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Preparation** (bootstrap job) | Every start-up, and in production also 10 minutes before the sale | Creates the tables and the sale (first time only), and the RabbitMQ queues. Adds the buyers PostgreSQL knows and Redis lacks, keeps every reservation Redis already has (a confirmed order may still be on its way), and sets `remainingStock` = `totalStock` − buyers. If Redis came back empty although orders exist, or a recovery did not finish, it runs the recovery procedure instead. Then it reconciles. Safe to run any number of times |
+| **During the sale**             | Between `startsAt` and `endsAt`                                   | Redis decides, orders travel through RabbitMQ, and workers save them into PostgreSQL                                                                                                                                                                                                                                                                                                                                                              |
+| **Reconciliation**              | At `endsAt`                                                       | Publishes any reservation that has no order record yet. See [Infrastructure](10-infrastructure.md#scheduling) for what triggers it                                                                                                                                                                                                                                                                                                                |
+| **Recovery**                    | Only after Redis loses data                                       | See [Consistency and recovery](06-consistency-and-recovery.md)                                                                                                                                                                                                                                                                                                                                                                                    |
+| **Reset**                       | Demos and stress tests only                                       | Deletes buyers, orders and queued messages, then restarts the sale with full stock                                                                                                                                                                                                                                                                                                                                                                |
 
-- **Stock is never reset blindly outside demos.** Preparation always computes it from the orders in PostgreSQL. A reset after real sales would sell the same units again.
+- **Stock is never reset blindly outside demos.** Preparation always computes it from the buyers in Redis and the orders in PostgreSQL. A reset after real sales would sell the same units again.
 - **There is no clean-up step after the sale.** Redis holds at most `totalStock` buyers, and "check my purchase" still reads them once the sale is over.
 
 ---

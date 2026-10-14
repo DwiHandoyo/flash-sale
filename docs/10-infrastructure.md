@@ -27,10 +27,12 @@ We invest in speed where the load is (API and Redis) and in reliability where th
 | `api`       | `api` app on Node 24 LTS            | 3         | Stateless, health check on `/health/ready`                                                                                                            | —                       |
 | `worker`    | `worker` app on Node 24 LTS         | 2         | RabbitMQ consumer with manual acks                                                                                                                    | —                       |
 | `bootstrap` | `jobs` app on Node 24 LTS           | Runs once | Creates tables, the sale and the RabbitMQ queues, then reconciles. The other jobs (`reconcile`, `recover`, `reset`) run from the same image on demand | —                       |
-| `scheduler` | `jobs` app on Node 24 LTS           | 1         | Local stand-in for EventBridge Scheduler: waits until `endsAt`, then runs reconciliation twice (at `endsAt` and 5 minutes later)                      | —                       |
+| `scheduler` | `jobs` app on Node 24 LTS           | 1         | Local stand-in for EventBridge Scheduler: checks every 15 s and runs reconciliation twice (at `endsAt` and 5 minutes later)                           | —                       |
 | `redis`     | Redis 8.2                           | 1         | `appendfsync always`; `maxmemory-policy noeviction`, so sale data is never evicted                                                                    | 16379                   |
 | `rabbitmq`  | RabbitMQ 4.x with management plugin | 1         | Quorum queue `orders` with a dead-letter queue                                                                                                        | 5672, 15672 (dashboard) |
 | `postgres`  | PostgreSQL 17                       | 1         | Main database plus a separate database for tests                                                                                                      | 15432                   |
+| `jobs`      | `jobs` app on Node 24 LTS           | On demand | Compose profile `manual`: `docker compose run --rm jobs reset` (or `reconcile`, `recover`)                                                            | —                       |
+| `stress`    | Stress-test load generator          | On demand | Compose profile `manual`, started by `npm run stress`                                                                                                 | —                       |
 
 - **Host ports for Redis and PostgreSQL are not the defaults** (6379, 5432), so they do not clash with copies already installed on the reviewer's machine.
 - **All data lives in Docker volumes,** so it survives container restarts.
@@ -78,7 +80,7 @@ The application code is the same in both. Only the wiring around it changes.
 ### EventBridge Scheduler
 
 - **Three kinds of schedule:** `at(...)` runs once at an exact time, `rate(...)` repeats at an interval, `cron(...)` follows a pattern.
-- **We use `at(...)`.** When a sale is configured, its schedules are created through the API, at that sale's own `endsAt`. When the sale changes, the schedules are updated.
+- **We use `at(...)`.** When a sale is configured, the `jobs` app creates its schedules at that sale's own times, and updates them when the sale changes (see [Cloud deployment](12-cloud-deployment.md); part of the design, not built).
 - **Built-in reliability:** retries, a dead-letter queue for runs that keep failing, and time zones.
 - **Precision is one minute.** That is fine for reconciliation, and it is one more reason why the sale window is checked on every request instead of being switched on and off by a scheduler.
 
@@ -110,7 +112,7 @@ await scheduler.send(
 
 ## Observability
 
-- **Local:** structured JSON logs from every service, plus the RabbitMQ dashboard (queues, dead letters, consumers).
+- **Local:** structured JSON logs from every app, plus the RabbitMQ dashboard (queues, dead letters, consumers). nginx logs only server errors (5xx), in plain text.
 - **Production alarms in CloudWatch:**
   - the dead-letter queue is not empty,
   - the order queue keeps growing,

@@ -44,14 +44,15 @@ The user is answered **before** the order reaches PostgreSQL. "Check my purchase
 
 The script checks these in this exact order. The first one that applies decides the answer.
 
-| #   | Check                            | Answer                                         | HTTP      |
-| --- | -------------------------------- | ---------------------------------------------- | --------- |
-| 0   | Is the sale paused for recovery? | `sale_paused`                                  | 503       |
-| 1   | Has this user already bought?    | `already_purchased`, with their original order | 409       |
-| 2   | Is it before `startsAt`?         | `sale_not_started`                             | 409       |
-| 3   | Is it at or after `endsAt`?      | `sale_ended`                                   | 409       |
-| 4   | Is the stock 0?                  | `sold_out`                                     | 409       |
-| 5   | Otherwise                        | Reserved: take one unit and record the buyer   | See below |
+| #   | Check                            | Answer                                                                                       | HTTP      |
+| --- | -------------------------------- | -------------------------------------------------------------------------------------------- | --------- |
+| –   | Is the sale missing from Redis?  | `sale_not_initialized`: Redis is empty, because bootstrap has not run or Redis lost its data | 503       |
+| 0   | Is the sale paused for recovery? | `sale_paused`                                                                                | 503       |
+| 1   | Has this user already bought?    | `already_purchased`, with their original order                                               | 409       |
+| 2   | Is it before `startsAt`?         | `sale_not_started`                                                                           | 409       |
+| 3   | Is it at or after `endsAt`?      | `sale_ended`                                                                                 | 409       |
+| 4   | Is the stock 0?                  | `sold_out`                                                                                   | 409       |
+| 5   | Otherwise                        | Reserved: take one unit and record the buyer                                                 | See below |
 
 After a reservation, the API publishes the order to RabbitMQ:
 
@@ -61,7 +62,7 @@ After a reservation, the API publishes the order to RabbitMQ:
 | No confirm (an error, or nothing within 2 s) | `503 service_unavailable`: "the outcome is unknown, check your purchase". The reservation stays and is completed later (see below) |
 
 - **Why "already bought" comes first:** it makes retries safe. If a user's first request succeeded but the response got lost, a retry returns their original order. It never hands out a second unit.
-- **Time comes from Redis**, not from the API servers. A server with a wrong clock cannot open the sale early or keep it open late.
+- **Time comes from Redis**, not from the API servers. A server with a wrong clock cannot open the sale early or keep it open late. The one exception is the shortcut before the opening, described below.
 
 ## Why it cannot oversell
 
@@ -80,6 +81,7 @@ The integration tests run this naive version next to the real script, under the 
 ## The script, in plain words
 
 ```text
+if the sale does not exist          → return "not_initialized"
 if the sale is paused               → return "paused"
 if buyers already contains userId   → return "already_purchased" + that order
 now = Redis server time
@@ -126,6 +128,8 @@ Duplicates are harmless, because the worker skips orders it has already saved.
 ## Shortcut before the sale opens
 
 Before `startsAt` nobody can own an order. The API therefore answers `sale_not_started` from its cached copy of the sale (refreshed every 0.5 s) without asking Redis. This absorbs the button-mashing before opening.
+
+This shortcut compares `startsAt` with the API server's own clock. A server whose clock runs behind keeps answering `sale_not_started` for as long as its clock is off. It can never open the sale early or keep it open late, because those answers always come from Redis. Servers keep their clocks in sync (NTP, or Amazon Time Sync in production), so the delay is a few milliseconds at most.
 
 ## Saving orders (worker)
 

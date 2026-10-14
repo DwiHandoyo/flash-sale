@@ -63,12 +63,12 @@ The details are in [Consistency and recovery](06-consistency-and-recovery.md).
 
 The repository has one app for each role. Each app is deployed and scaled on its own. "Three API servers" means three identical copies (replicas) of the API app behind the load balancer.
 
-| App      | Copies in the local demo | Triggered by                        | Job                                          |
-| -------- | ------------------------ | ----------------------------------- | -------------------------------------------- |
-| `api`    | 3                        | HTTP requests                       | Serve the sale status, purchases and lookups |
-| `worker` | 2                        | Messages in RabbitMQ                | Save orders to PostgreSQL                    |
-| `jobs`   | Runs once, then exits    | Start-up, a schedule or an operator | Bootstrap, reconcile, recover                |
-| `web`    | 1                        | Browsers                            | The React app                                |
+| App      | Copies in the local demo                                                   | Triggered by                        | Job                                          |
+| -------- | -------------------------------------------------------------------------- | ----------------------------------- | -------------------------------------------- |
+| `api`    | 3                                                                          | HTTP requests                       | Serve the sale status, purchases and lookups |
+| `worker` | 2                                                                          | Messages in RabbitMQ                | Save orders to PostgreSQL                    |
+| `jobs`   | `bootstrap` once at start-up; `scheduler` all the time; the rest on demand | Start-up, a schedule or an operator | Bootstrap, reconcile, recover                |
+| `web`    | 1                                                                          | Browsers                            | The React app                                |
 
 **This is not microservices.** The apps are split by **role and runtime**, not by business domain. They share one Redis, one database and one small shared package with the domain rules and the order message format. Splitting the sale by domain (a stock service, an order service, a user service) would put the stock check and the order creation in different places, which makes them hard to keep atomic. It would also add network hops and more moving parts. The code layout is described in [Code structure](11-code-structure.md).
 

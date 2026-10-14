@@ -49,7 +49,7 @@ flowchart TD
 4. **Rebuild.** buyers = every order in PostgreSQL, and `remainingStock` = `totalStock` − number of orders.
 5. **Resume.** The job removes `paused`, and the sale continues.
 
-While the job waits (for example because PostgreSQL is down too), the sale stays paused. **Correctness wins over availability.** This is a rare event.
+If the job cannot finish, it exits with an error and leaves the sale paused. That happens when PostgreSQL is down too, when the queue does not drain within `DRAIN_TIMEOUT_MS` (5 minutes, for example because no worker runs), or when dead letters are waiting. An operator fixes the cause and runs it again; the next bootstrap also runs it, because it finds the sale still paused. **Correctness wins over availability.** This is a rare event.
 
 **Why the result is correct:**
 
@@ -85,7 +85,7 @@ The job therefore ignores all readings for a settle period after the pause (`DRA
 
 When the sale ends (and whenever the bootstrap job runs), every buyer in Redis without an order record is published to RabbitMQ again. This completes reservations whose confirm never arrived. Duplicates are skipped by the worker.
 
-- **Locally,** a small `scheduler` service (from the `jobs` app) stands in for EventBridge Scheduler. It waits until `endsAt`, runs reconciliation, and runs it once more 5 minutes later. The `reconcile` command runs it by hand.
+- **Locally,** a small `scheduler` service (from the `jobs` app) stands in for EventBridge Scheduler. It runs all the time and checks every 15 seconds: once `endsAt` has passed it runs reconciliation, and once more 5 minutes later. The `reconcile` command runs it by hand.
 - **In production,** an EventBridge Scheduler one-time schedule at `endsAt` triggers it. See [Infrastructure](10-infrastructure.md#scheduling).
 
 ## Last guard in PostgreSQL

@@ -9,7 +9,7 @@
 | D3  | PostgreSQL is written in the background                                                 | Writing to it on every request                             | The database cannot become the bottleneck                           |
 | D4  | Unconfirmed reservations are completed, never cancelled                                 | Expiring them                                              | Cancelling could sell a unit twice                                  |
 | D5  | Buying again returns your original order                                                | Answering with an error                                    | Retries are safe for users and for the load balancer                |
-| D6  | Redis's clock decides the sale window                                                   | Each API server's clock                                    | Clock drift cannot open or close the sale wrongly                   |
+| D6  | Redis's clock decides the sale window                                                   | Each API server's clock                                    | Clock drift cannot open the sale early or keep it open late         |
 | D7  | Redis syncs every write to disk before replying                                         | Syncing once per second                                    | A restart needs no recovery; cheap because only winners write       |
 | D8  | One repository with a separate app per role (API, worker, jobs, web)                    | One app doing everything, or microservices split by domain | Each app deploys and scales on its own; the rules stay together     |
 | D9  | Fastify for the API                                                                     | Express, NestJS                                            | Fast, with built-in validation and little ceremony                  |
@@ -76,6 +76,8 @@
 ## D6. One clock: Redis
 
 **Why.** The clocks of different API servers drift apart. The script reads the time from Redis, so the window is exactly the same for every request.
+
+**Exception.** Before the opening, the API answers `sale_not_started` without asking Redis, using its own clock ([Purchase flow](03-purchase-flow.md#shortcut-before-the-sale-opens)). A server whose clock runs behind can therefore delay the opening for its users by its clock error, which is milliseconds with synchronised clocks. It cannot open the sale early.
 
 ## D7. Redis syncs every write to disk (`appendfsync always`)
 
