@@ -129,13 +129,16 @@ Before `startsAt` nobody can own an order. The API therefore answers `sale_not_s
 
 ## Saving orders (worker)
 
-1. Receive a batch of orders from RabbitMQ.
-2. Insert them into PostgreSQL in one transaction, skipping duplicates.
+1. Receive a batch of orders from RabbitMQ (up to 100, or whatever arrived within 50 ms).
+2. Save them with one SQL statement. It inserts the new orders, skips duplicates, and raises the sale's `sold_count` by the number inserted.
 3. Acknowledge them after the commit.
 
-- **If the insert fails,** for example because PostgreSQL is down, the worker rejects the messages and RabbitMQ delivers them again later.
-- **If a worker crashes,** RabbitMQ immediately redelivers its unacknowledged messages to another worker.
-- **After 10 failed deliveries,** a message moves to the dead-letter queue and raises an alarm.
+**When something goes wrong:**
+
+- **PostgreSQL is down:** the worker keeps the batch and retries it with growing delays, up to 10 s apart. The messages stay unacknowledged in RabbitMQ. Sending them back instead would use up their delivery limit within seconds, and good orders would end in the dead-letter queue only because the database was briefly down.
+- **The data is refused:** for example an unreadable message, or an order that would push `sold_count` over the stock. The worker splits the batch to find the culprit, dead-letters it for inspection (which raises an alarm), and saves the rest.
+- **A worker crashes:** RabbitMQ immediately redelivers its unacknowledged messages to another worker.
+- **A message keeps coming back:** after 10 deliveries (for example, crash after crash), it moves to the dead-letter queue.
 
 ---
 

@@ -103,8 +103,8 @@ export class DataStack extends Stack {
       logs: { general: true },
     });
     this.rabbitMq.applyRemovalPolicy(keep);
-    // The queues themselves (orders + dead-letter) are declared by the bootstrap job, exactly as
-    // they are locally, so there is one definition of the topology.
+    // The queues themselves (orders + dead-letter) are declared in code by the bootstrap job and
+    // the worker, exactly as they are locally, so there is one definition of the topology.
 
     // --- PostgreSQL: RDS + RDS Proxy ------------------------------------------------------
     const postgres = new rds.DatabaseInstance(this, 'Postgres', {

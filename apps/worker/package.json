@@ -1,0 +1,22 @@
+{
+  "name": "@flash-sale/worker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Moves confirmed orders from RabbitMQ into PostgreSQL",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/main.ts",
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc",
+    "test": "vitest run --project unit",
+    "test:integration": "vitest run --project integration"
+  },
+  "dependencies": {
+    "@flash-sale/shared": "*",
+    "amqplib": "^2.2.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1",
+    "pino": "^10.4.0"
+  }
+}

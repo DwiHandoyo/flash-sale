@@ -12,6 +12,7 @@
     "./logger": "./src/logger.ts",
     "./order": "./src/order.ts",
     "./order-publisher": "./src/order-publisher.ts",
+    "./postgres": "./src/postgres/index.ts",
     "./rabbitmq": "./src/rabbitmq.ts",
     "./redis-client": "./src/redis-client.ts",
     "./redis-keys": "./src/redis-keys.ts",
@@ -25,6 +26,10 @@
   "dependencies": {
     "amqplib": "^2.2.0",
     "ioredis": "^5.11.1",
+    "pg": "^8.23.1",
     "pino": "^10.4.0"
+  },
+  "devDependencies": {
+    "@types/pg": "^8.23.1"
   }
 }

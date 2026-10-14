@@ -21,7 +21,8 @@
 | `orders`             | Durable quorum queue (replicated in a cluster) | One message per order: `orderId`, `saleId`, `userId`, `purchasedAt` | Persistent messages, publisher confirms, manual consumer acks. After 10 failed deliveries a message goes to the dead-letter queue |
 | `orders.dead-letter` | Durable queue                                  | Orders that could not be saved                                      | Monitored. The recovery job refuses to run while this queue is not empty                                                          |
 
-Each message's ID is its order ID, so a message published twice is easy to recognise.
+- **Each message's ID is its order ID,** so a message published twice is easy to recognise.
+- **The queues are declared in code.** The bootstrap job and the worker both declare them on start-up, which is safe because declaring is idempotent.
 
 ## PostgreSQL: permanent record
 
