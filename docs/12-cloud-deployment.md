@@ -62,12 +62,12 @@ flowchart TB
 
 ### Why the worker can be serverless but the API cannot
 
-|             | Worker on Lambda                                                        | API on Lambda                                          |
-| ----------- | ----------------------------------------------------------------------- | ------------------------------------------------------ |
-| Load        | Small and bursty: at most `stock` orders in a few seconds, then nothing | Thousands of requests in the same second               |
-| Cold starts | Only delay saving to PostgreSQL, so users never notice                  | Thousands at once, exactly when the sale opens         |
-| Connections | Bounded concurrency plus RDS Proxy keep PostgreSQL safe                 | Thousands of new Redis connections at the worst moment |
-| Verdict     | **A good fit**                                                          | **Not a fit.** Containers, scaled out before the sale  |
+|             | Worker on Lambda                                                                        | API on Lambda                                          |
+| ----------- | --------------------------------------------------------------------------------------- | ------------------------------------------------------ |
+| Load        | Small and bursty: at most `stock` orders in a few seconds, then nothing                 | Thousands of requests in the same second               |
+| Cold starts | Only delay saving to PostgreSQL, so users never notice                                  | Thousands at once, exactly when the sale opens         |
+| Connections | Bounded concurrency plus RDS Proxy (PgBouncer's part locally, D15) keep PostgreSQL safe | Thousands of new Redis connections at the worst moment |
+| Verdict     | **A good fit**                                                                          | **Not a fit.** Containers, scaled out before the sale  |
 
 The volume of a flash sale is unpredictable, but its **timing is known in advance**. That is why scheduled scaling beats reactive autoscaling for the API.
 

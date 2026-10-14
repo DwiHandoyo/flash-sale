@@ -22,6 +22,7 @@ flowchart LR
     subgraph records["Records: eventual consistency"]
         rabbit[["RabbitMQ: order queue"]]
         workers["Workers"]
+        pgbouncer["PgBouncer: connection pool"]
         postgres[("PostgreSQL: order records")]
     end
 
@@ -32,7 +33,8 @@ flowchart LR
     apis -->|"1. reserve: one atomic script"| redis
     apis -->|"2. publish, wait for confirm"| rabbit
     rabbit -->|deliver| workers
-    workers -->|"insert, then ack"| postgres
+    workers -->|"insert, then ack"| pgbouncer
+    pgbouncer --> postgres
     recovery -.->|"rebuild after data loss"| redis
     recovery -.->|"read orders"| postgres
 ```
@@ -47,6 +49,7 @@ flowchart LR
 | Redis                                | Decides purchases. It holds the remaining stock, who bought, and the sale window                                   | **Yes**      |
 | RabbitMQ                             | Keeps each new order safe until a worker has saved it                                                              | **Yes**      |
 | Worker                               | Takes orders from RabbitMQ and saves them in PostgreSQL                                                            | No           |
+| PgBouncer                            | Lets all workers and jobs share a few PostgreSQL connections. RDS Proxy plays this part in production              | No           |
 | PostgreSQL                           | Keeps the permanent order records                                                                                  | **Yes**      |
 | Jobs (bootstrap, reconcile, recover) | Prepare Redis from PostgreSQL before the sale, complete unfinished reservations, and rebuild Redis after data loss | No           |
 

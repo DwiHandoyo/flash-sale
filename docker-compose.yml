@@ -9,7 +9,8 @@ x-connections:
   redis: &redis-url redis://redis:6379
   rabbitmq: &rabbitmq-url amqp://flash:flash@rabbitmq:5672
   rabbitmq-management: &rabbitmq-management-url http://flash:flash@rabbitmq:15672
-  postgres: &database-url postgres://flash:flash@postgres:5432/flash_sale
+  # The apps reach PostgreSQL through PgBouncer, as they reach RDS through RDS Proxy in production.
+  postgres: &database-url postgres://flash:flash@pgbouncer:5432/flash_sale
 
 # What every long-running app service has in common.
 x-app: &app
@@ -38,7 +39,7 @@ x-jobs: &jobs
   depends_on:
     redis: { condition: service_healthy }
     rabbitmq: { condition: service_healthy }
-    postgres: { condition: service_healthy }
+    pgbouncer: { condition: service_healthy }
 
 services:
   # ---- Application ------------------------------------------------------------------------------
@@ -72,7 +73,8 @@ services:
     <<: *app
     build: { context: ., target: worker }
     deploy:
-      replicas: 2
+      # WORKER_REPLICAS=20 simulates workers scaled out, e.g. many Lambda instances.
+      replicas: ${WORKER_REPLICAS:-2}
     environment:
       LOG_LEVEL: ${LOG_LEVEL:-info}
       RABBITMQ_URL: *rabbitmq-url
@@ -170,6 +172,26 @@ services:
       timeout: 5s
       retries: 30
       start_period: 20s
+
+  # Connection pooler in front of PostgreSQL, the local stand-in for RDS Proxy (docs/07, D15).
+  # However many workers run, PostgreSQL sees at most DEFAULT_POOL_SIZE connections from them.
+  pgbouncer:
+    image: edoburu/pgbouncer:v1.26.0-p0
+    environment:
+      DATABASE_URL: postgres://flash:flash@postgres:5432/flash_sale
+      AUTH_TYPE: scram-sha-256
+      # A server connection is lent for one transaction, then returns to the pool. This works
+      # because the apps keep no state in a session: no session locks, SET or LISTEN.
+      POOL_MODE: transaction
+      MAX_CLIENT_CONN: 1000
+      DEFAULT_POOL_SIZE: 10
+    healthcheck:
+      test: ['CMD', 'pg_isready', '-h', '127.0.0.1', '-p', '5432']
+      interval: 2s
+      timeout: 2s
+      retries: 30
+    depends_on:
+      postgres: { condition: service_healthy }
 
   postgres:
     image: postgres:17-alpine

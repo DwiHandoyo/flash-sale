@@ -6,7 +6,7 @@ A flash sale for one product with limited stock, a configurable time window and 
 - **"You got it" is never lost.** The user is told only after RabbitMQ has confirmed it stored the order. Workers then save it in PostgreSQL.
 - **Proven under load and failure.** 10,000 users at once sell exactly the stock, and the checks still pass while servers are killed, PostgreSQL is stopped or Redis loses all its data.
 
-Stack: Node.js 24 and TypeScript (Fastify), React, Redis, RabbitMQ, PostgreSQL, nginx, Docker Compose.
+Stack: Node.js 24 and TypeScript (Fastify), React, Redis, RabbitMQ, PostgreSQL with PgBouncer, nginx, Docker Compose.
 
 ## Quick start
 
@@ -36,7 +36,8 @@ flowchart LR
     apis -->|"1. reserve: one atomic script"| redis[("Redis<br/>stock, buyers, window")]
     apis -->|"2. publish, wait for confirm"| rabbit[["RabbitMQ<br/>order queue"]]
     rabbit --> workers["Workers ×2"]
-    workers -->|"3. save, then ack"| postgres[("PostgreSQL<br/>order records")]
+    workers -->|"3. save, then ack"| pgbouncer["PgBouncer<br/>connection pool"]
+    pgbouncer --> postgres[("PostgreSQL<br/>order records")]
     jobs["Jobs: bootstrap, reconcile, recover"] -.-> redis
     jobs -.-> postgres
 ```
@@ -45,7 +46,7 @@ flowchart LR
 2. **A Lua script in Redis decides each purchase** in one step that nothing can interrupt. It checks whether this user already bought, checks the sale window against Redis's own clock, checks the stock, then takes a unit and records the buyer.
 3. **The API publishes the order to RabbitMQ** (a quorum queue) and waits for the publisher confirm.
 4. **Only then does the user get `201 purchased`.** Buying again returns the same order, so retries are safe.
-5. **Workers save orders into PostgreSQL** in batches. Saving is idempotent, a unique constraint allows one order per user, and a `CHECK` on the sold count is a last guard against overselling.
+5. **Workers save orders into PostgreSQL** in batches, through PgBouncer. Saving is idempotent, a unique constraint allows one order per user, and a `CHECK` on the sold count is a last guard against overselling.
 
 **Redis decides; RabbitMQ and PostgreSQL record.** The database is never on the request path, so the sale keeps selling when PostgreSQL is down, and the workers catch up afterwards. If Redis loses its data, a recovery job pauses the sale, waits for the queue to drain, rebuilds Redis from PostgreSQL and resumes.
 
@@ -53,18 +54,19 @@ The full design is in [docs/](docs/README.md). Twelve short documents cover the 
 
 ## Design choices and trade-offs
 
-| Choice                                                                        | Why                                                                                                          | Trade-off                                                                                                                                                            |
-| ----------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **A Redis script decides each purchase**                                      | Atomic and in memory: no locks, no race between "check stock" and "take one"                                 | During the sale, Redis holds the truth. It needs durability (below) and a recovery procedure                                                                         |
-| **RabbitMQ with publisher confirms before answering**                         | A second durable copy exists before the user hears "you got it", even if Redis dies a moment later           | One more component. If RabbitMQ is down, purchases answer `503` until it is back (rare: a cluster in production)                                                     |
-| **PostgreSQL off the request path**                                           | A slow or failed database does not slow or stop the sale                                                     | Order records are eventually consistent, typically a few milliseconds behind                                                                                         |
-| **Reservations are completed, never cancelled**                               | When a confirm is lost, cancelling could free a unit that is actually sold                                   | A reservation whose publish failed waits for the user's retry or for reconciliation at the end of the sale                                                           |
-| **Redis `appendfsync always`**                                                | A Redis restart loses nothing, so no recovery is needed after it. Only winners write, at most `stock` writes | Slower writes in theory. Measured: no difference here, even with every user writing (see the stress test)                                                            |
-| **One clock: Redis `TIME`**                                                   | API servers' clocks drift; the window is the same for every request                                          | The "not started yet" shortcut uses each server's clock, so a server running behind delays the opening by its error (milliseconds with NTP). It can never open early |
-| **The clock opens and closes the sale**                                       | Checked on every request, so no scheduled job can be late or fail to switch it                               | Reconciliation still needs a scheduler at `endsAt` (EventBridge in production, the `scheduler` service locally)                                                      |
-| **Separate apps per role in one repository** (api, worker, jobs, web, shared) | Each scales and deploys on its own; the API never touches PostgreSQL, the worker never touches Redis         | More entry points than a single server; they share one package for the message contract and key names                                                                |
-| **Status by polling** (every 2 s, cached for 0.5 s)                           | Simple, cache-friendly, and good enough for a countdown                                                      | Up to a few seconds of delay on the stock shown; the purchase answer itself is always exact                                                                          |
-| **Fail fast**                                                                 | Unreachable Redis or RabbitMQ gives an immediate `503`, and an overloaded server sheds load                  | Users see "try again" instead of waiting                                                                                                                             |
+| Choice                                                                                      | Why                                                                                                          | Trade-off                                                                                                                                                            |
+| ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **A Redis script decides each purchase**                                                    | Atomic and in memory: no locks, no race between "check stock" and "take one"                                 | During the sale, Redis holds the truth. It needs durability (below) and a recovery procedure                                                                         |
+| **RabbitMQ with publisher confirms before answering**                                       | A second durable copy exists before the user hears "you got it", even if Redis dies a moment later           | One more component. If RabbitMQ is down, purchases answer `503` until it is back (rare: a cluster in production)                                                     |
+| **PostgreSQL off the request path**                                                         | A slow or failed database does not slow or stop the sale                                                     | Order records are eventually consistent, typically a few milliseconds behind                                                                                         |
+| **Reservations are completed, never cancelled**                                             | When a confirm is lost, cancelling could free a unit that is actually sold                                   | A reservation whose publish failed waits for the user's retry or for reconciliation at the end of the sale                                                           |
+| **Redis `appendfsync always`**                                                              | A Redis restart loses nothing, so no recovery is needed after it. Only winners write, at most `stock` writes | Slower writes in theory. Measured: no difference here, even with every user writing (see the stress test)                                                            |
+| **One clock: Redis `TIME`**                                                                 | API servers' clocks drift; the window is the same for every request                                          | The "not started yet" shortcut uses each server's clock, so a server running behind delays the opening by its error (milliseconds with NTP). It can never open early |
+| **The clock opens and closes the sale**                                                     | Checked on every request, so no scheduled job can be late or fail to switch it                               | Reconciliation still needs a scheduler at `endsAt` (EventBridge in production, the `scheduler` service locally)                                                      |
+| **A connection pooler in front of PostgreSQL** (PgBouncer locally, RDS Proxy in production) | Scaled-out workers (many Lambda instances) cannot exhaust PostgreSQL's connections: 20 workers shared 10     | One more hop; no session state allowed, so the migration lock is transaction-scoped                                                                                  |
+| **Separate apps per role in one repository** (api, worker, jobs, web, shared)               | Each scales and deploys on its own; the API never touches PostgreSQL, the worker never touches Redis         | More entry points than a single server; they share one package for the message contract and key names                                                                |
+| **Status by polling** (every 2 s, cached for 0.5 s)                                         | Simple, cache-friendly, and good enough for a countdown                                                      | Up to a few seconds of delay on the stock shown; the purchase answer itself is always exact                                                                          |
+| **Fail fast**                                                                               | Unreachable Redis or RabbitMQ gives an immediate `503`, and an overloaded server sheds load                  | Users see "try again" instead of waiting                                                                                                                             |
 
 **Not built, on purpose:** login, payment, several sales at once, and bot protection or rate limiting. Users type a username or email; "purchased" means a unit is reserved for them. More in [Decisions](docs/07-decisions.md).
 
@@ -167,6 +169,8 @@ Measured on one laptop: a 4-core Intel Core i7 (8 threads) with Docker Desktop o
 | Stock 10,000 (every user writes to Redis) | `everysec`  | 2,008–2,304 req/s | 191–220 ms | 410–464 ms | 8/8    |
 
 **`appendfsync always` costs nothing measurable here,** even when every request writes. The spread between two runs of the same setting is larger than the gap between the settings. Two caveats: the bottleneck here is shared CPU, not Redis; and fsync on Docker Desktop's virtual disk may be cheaper than on a server's disk. Run it yourself with `REDIS_APPENDFSYNC=everysec npm run stress`; the next plain run switches back.
+
+**Scaled-out workers:** `WORKER_REPLICAS=20 npm run stress -- --stock 10000` runs 20 workers. They opened 21 connections into PgBouncer, PostgreSQL never saw more than 10, and every check passed.
 
 ### Chaos runs
 

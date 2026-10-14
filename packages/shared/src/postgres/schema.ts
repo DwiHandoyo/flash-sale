@@ -1,5 +1,7 @@
 import type pg from 'pg';
 
+import { withTransaction } from './pool';
+
 const MIGRATION_LOCK_ID = 7_270_001;
 
 /** The schema from docs/04-data-model.md. Idempotent, so it is safe to run on every start-up. */
@@ -27,14 +29,14 @@ CREATE TABLE IF NOT EXISTS orders (
 );
 `;
 
-/** The advisory lock serialises concurrent start-ups; CREATE ... IF NOT EXISTS alone can race. */
+/**
+ * The advisory lock serialises concurrent start-ups; CREATE ... IF NOT EXISTS alone can race. It
+ * is transaction-scoped, so it also works behind PgBouncer or RDS Proxy in transaction pooling
+ * mode, where a session-level lock and its unlock could land on different server connections.
+ */
 export async function migrate(pool: pg.Pool): Promise<void> {
-  const client = await pool.connect();
-  try {
-    await client.query('SELECT pg_advisory_lock($1)', [MIGRATION_LOCK_ID]);
+  await withTransaction(pool, async (client) => {
+    await client.query('SELECT pg_advisory_xact_lock($1)', [MIGRATION_LOCK_ID]);
     await client.query(SCHEMA);
-  } finally {
-    await client.query('SELECT pg_advisory_unlock($1)', [MIGRATION_LOCK_ID]).catch(() => undefined);
-    client.release();
-  }
+  });
 }

@@ -50,6 +50,8 @@ Example: `npm run stress -- --users 20000 --stock 500`.
 
 **`appendfsync always` vs `everysec` (D7).** `REDIS_APPENDFSYNC=everysec npm run stress` restarts Redis with `everysec`; the next plain `npm run stress` switches it back. This measures what `always` costs. It cannot show what `everysec` risks: with both settings, Redis hands each write to the operating system before it replies, so only a crash of the machine itself loses data under `everysec`, and killing a container is not such a crash.
 
+**Scaled-out workers (D15).** `WORKER_REPLICAS=20 npm run stress -- --stock 10000` runs 20 workers, as when many Lambda instances start at once. They opened 21 connections into PgBouncer, and PostgreSQL never saw more than 10. Every check passed.
+
 ## Chaos runs
 
 `npm run stress -- --chaos <fault>` runs the same test with a fault injected one second after the opening. Every check still has to pass.

@@ -11,8 +11,8 @@
                                Redis        ← the heaviest load
                                  │  winners only (≤ stock, e.g. 100)
                                  ▼
-                   RabbitMQ ──► Worker ──► PostgreSQL
-                   (≤ stock messages)       (≤ stock rows)
+                   RabbitMQ ──► Worker ──► PgBouncer ──► PostgreSQL
+                   (≤ stock messages)     (≤ 10 connections, ≤ stock rows)
 ```
 
 We invest in speed where the load is (API and Redis) and in reliability where the data is (RabbitMQ and PostgreSQL).
@@ -21,18 +21,19 @@ We invest in speed where the load is (API and Redis) and in reliability where th
 
 `docker compose up --build` starts the whole system.
 
-| Service     | Image                               | Copies    | Key settings                                                                                                                                          | Host port               |
-| ----------- | ----------------------------------- | --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
-| `web`       | nginx 1.30 + the React build        | 1         | Load balances over the API servers; retries a failed request on another server                                                                        | 8080                    |
-| `api`       | `api` app on Node 24 LTS            | 3         | Stateless, health check on `/health/ready`                                                                                                            | —                       |
-| `worker`    | `worker` app on Node 24 LTS         | 2         | RabbitMQ consumer with manual acks                                                                                                                    | —                       |
-| `bootstrap` | `jobs` app on Node 24 LTS           | Runs once | Creates tables, the sale and the RabbitMQ queues, then reconciles. The other jobs (`reconcile`, `recover`, `reset`) run from the same image on demand | —                       |
-| `scheduler` | `jobs` app on Node 24 LTS           | 1         | Local stand-in for EventBridge Scheduler: checks every 15 s and runs reconciliation twice (at `endsAt` and 5 minutes later)                           | —                       |
-| `redis`     | Redis 8.2                           | 1         | `appendfsync always`; `maxmemory-policy noeviction`, so sale data is never evicted                                                                    | 16379                   |
-| `rabbitmq`  | RabbitMQ 4.x with management plugin | 1         | Quorum queue `orders` with a dead-letter queue                                                                                                        | 5672, 15672 (dashboard) |
-| `postgres`  | PostgreSQL 17                       | 1         | Main database plus a separate database for tests                                                                                                      | 15432                   |
-| `jobs`      | `jobs` app on Node 24 LTS           | On demand | Compose profile `manual`: `docker compose run --rm jobs reset` (or `reconcile`, `recover`)                                                            | —                       |
-| `stress`    | Stress-test load generator          | On demand | Compose profile `manual`, started by `npm run stress`                                                                                                 | —                       |
+| Service     | Image                               | Copies                | Key settings                                                                                                                                          | Host port               |
+| ----------- | ----------------------------------- | --------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------- |
+| `web`       | nginx 1.30 + the React build        | 1                     | Load balances over the API servers; retries a failed request on another server                                                                        | 8080                    |
+| `api`       | `api` app on Node 24 LTS            | 3                     | Stateless, health check on `/health/ready`                                                                                                            | —                       |
+| `worker`    | `worker` app on Node 24 LTS         | 2 (`WORKER_REPLICAS`) | RabbitMQ consumer with manual acks                                                                                                                    | —                       |
+| `bootstrap` | `jobs` app on Node 24 LTS           | Runs once             | Creates tables, the sale and the RabbitMQ queues, then reconciles. The other jobs (`reconcile`, `recover`, `reset`) run from the same image on demand | —                       |
+| `scheduler` | `jobs` app on Node 24 LTS           | 1                     | Local stand-in for EventBridge Scheduler: checks every 15 s and runs reconciliation twice (at `endsAt` and 5 minutes later)                           | —                       |
+| `redis`     | Redis 8.2                           | 1                     | `appendfsync always`; `maxmemory-policy noeviction`, so sale data is never evicted                                                                    | 16379                   |
+| `rabbitmq`  | RabbitMQ 4.x with management plugin | 1                     | Quorum queue `orders` with a dead-letter queue                                                                                                        | 5672, 15672 (dashboard) |
+| `pgbouncer` | PgBouncer 1.26                      | 1                     | Transaction pooling: the workers and jobs share at most 10 PostgreSQL connections. Local stand-in for RDS Proxy (D15)                                 | —                       |
+| `postgres`  | PostgreSQL 17                       | 1                     | Main database plus a separate database for tests                                                                                                      | 15432                   |
+| `jobs`      | `jobs` app on Node 24 LTS           | On demand             | Compose profile `manual`: `docker compose run --rm jobs reset` (or `reconcile`, `recover`)                                                            | —                       |
+| `stress`    | Stress-test load generator          | On demand             | Compose profile `manual`, started by `npm run stress`                                                                                                 | —                       |
 
 - **Host ports for Redis and PostgreSQL are not the defaults** (6379, 5432), so they do not clash with copies already installed on the reviewer's machine.
 - **All data lives in Docker volumes,** so it survives container restarts.
@@ -57,6 +58,7 @@ The AWS setup is described in [Cloud deployment](12-cloud-deployment.md). That d
 | Redis                      | One node, with every write saved to disk                                                                                                            | MemoryDB across zones, or ElastiCache with a replica and failover  |
 | RabbitMQ                   | One node                                                                                                                                            | 3-node cluster (Amazon MQ)                                         |
 | PostgreSQL                 | One container, plus a separate test database                                                                                                        | RDS Multi-AZ with automated backups                                |
+| Connection pooling         | PgBouncer in transaction mode, at most 10 server connections                                                                                        | RDS Proxy                                                          |
 | Scheduled jobs             | Bootstrap runs at start-up. A small `scheduler` service stands in for EventBridge Scheduler and runs reconciliation at `endsAt` and 5 minutes later | EventBridge Scheduler and ECS scheduled scaling                    |
 | Recovery                   | `recover` command, run by hand                                                                                                                      | The same job as a one-off ECS task, started by an operator         |
 | Configuration and secrets  | Environment variables in Compose                                                                                                                    | Environment variables, with secrets in AWS Secrets Manager         |

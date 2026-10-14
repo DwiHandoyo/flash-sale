@@ -2,23 +2,24 @@
 
 > **In short:** the table lists every significant choice. The sections below explain each one in a few lines: what we chose, what else we considered, and what it costs us.
 
-|     | Decision                                                                                | Instead of                                                 | Main reason                                                         |
-| --- | --------------------------------------------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------- |
-| D1  | A Redis script decides each purchase atomically                                         | Locking a database row                                     | Fast, with no lock queue under contention                           |
-| D2  | RabbitMQ carries orders to PostgreSQL and confirms each one before the user is answered | A queue inside Redis (Redis Streams)                       | Every order has a second safe copy before "you got it"              |
-| D3  | PostgreSQL is written in the background                                                 | Writing to it on every request                             | The database cannot become the bottleneck                           |
-| D4  | Unconfirmed reservations are completed, never cancelled                                 | Expiring them                                              | Cancelling could sell a unit twice                                  |
-| D5  | Buying again returns your original order                                                | Answering with an error                                    | Retries are safe for users and for the load balancer                |
-| D6  | Redis's clock decides the sale window                                                   | Each API server's clock                                    | Clock drift cannot open the sale early or keep it open late         |
-| D7  | Redis syncs every write to disk before replying                                         | Syncing once per second                                    | A restart needs no recovery; cheap because only winners write       |
-| D8  | One repository with a separate app per role (API, worker, jobs, web)                    | One app doing everything, or microservices split by domain | Each app deploys and scales on its own; the rules stay together     |
-| D9  | Fastify for the API                                                                     | Express, NestJS                                            | Fast, with built-in validation and little ceremony                  |
-| D10 | The app polls the sale status every 2 s                                                 | WebSockets or server-sent events                           | Simple and cacheable                                                |
-| D11 | Fail fast when overloaded                                                               | Queueing requests until they time out                      | Latency stays predictable and servers stay healthy                  |
-| D12 | The sale opens and closes by the clock, checked on every request                        | A scheduler switching it on and off                        | Exact to the millisecond, with no job that can fail                 |
-| D13 | In production, workers run on Lambda and the API on containers scaled before the sale   | Serverless everywhere, or containers everywhere            | Each part runs on what fits its load                                |
-| D14 | Production infrastructure as code with the AWS CDK in TypeScript, as a design only      | Terraform, or deploying it                                 | Same language as the project; the assignment asks for no deployment |
-| D15 | No login, payment, bot protection or rate limiting                                      | Building them                                              | Out of scope; where they would go is noted                          |
+|     | Decision                                                                                                   | Instead of                                                 | Main reason                                                         |
+| --- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------- |
+| D1  | A Redis script decides each purchase atomically                                                            | Locking a database row                                     | Fast, with no lock queue under contention                           |
+| D2  | RabbitMQ carries orders to PostgreSQL and confirms each one before the user is answered                    | A queue inside Redis (Redis Streams)                       | Every order has a second safe copy before "you got it"              |
+| D3  | PostgreSQL is written in the background                                                                    | Writing to it on every request                             | The database cannot become the bottleneck                           |
+| D4  | Unconfirmed reservations are completed, never cancelled                                                    | Expiring them                                              | Cancelling could sell a unit twice                                  |
+| D5  | Buying again returns your original order                                                                   | Answering with an error                                    | Retries are safe for users and for the load balancer                |
+| D6  | Redis's clock decides the sale window                                                                      | Each API server's clock                                    | Clock drift cannot open the sale early or keep it open late         |
+| D7  | Redis syncs every write to disk before replying                                                            | Syncing once per second                                    | A restart needs no recovery; cheap because only winners write       |
+| D8  | One repository with a separate app per role (API, worker, jobs, web)                                       | One app doing everything, or microservices split by domain | Each app deploys and scales on its own; the rules stay together     |
+| D9  | Fastify for the API                                                                                        | Express, NestJS                                            | Fast, with built-in validation and little ceremony                  |
+| D10 | The app polls the sale status every 2 s                                                                    | WebSockets or server-sent events                           | Simple and cacheable                                                |
+| D11 | Fail fast when overloaded                                                                                  | Queueing requests until they time out                      | Latency stays predictable and servers stay healthy                  |
+| D12 | The sale opens and closes by the clock, checked on every request                                           | A scheduler switching it on and off                        | Exact to the millisecond, with no job that can fail                 |
+| D13 | In production, workers run on Lambda and the API on containers scaled before the sale                      | Serverless everywhere, or containers everywhere            | Each part runs on what fits its load                                |
+| D14 | Production infrastructure as code with the AWS CDK in TypeScript, as a design only                         | Terraform, or deploying it                                 | Same language as the project; the assignment asks for no deployment |
+| D15 | Workers and jobs reach PostgreSQL through a connection pooler (PgBouncer locally, RDS Proxy in production) | Every instance connecting directly                         | Scaled-out workers cannot exhaust PostgreSQL's connections          |
+| D16 | No login, payment, bot protection or rate limiting                                                         | Building them                                              | Out of scope; where they would go is noted                          |
 
 ## D1. A Redis script decides each purchase
 
@@ -160,7 +161,23 @@ Terraform would be the choice for a multi-cloud setup.
 
 **Why not deployed.** The assignment says a live cloud environment is not needed. Reviewers run everything locally with Docker Compose.
 
-## D15. Not built
+## D15. A connection pooler in front of PostgreSQL
+
+**Choice.** The worker and the jobs reach PostgreSQL through a pooler in transaction mode: PgBouncer locally, RDS Proxy in production. However many workers run, PostgreSQL sees at most a fixed number of connections from them (10 locally).
+
+**Why.**
+
+- Workers scale out, and on Lambda every instance opens its own connections. PostgreSQL has a hard connection limit, and each connection is a server process with its own memory. A burst of instances could exhaust it exactly when the orders arrive.
+- The pooler lends a server connection for one transaction, then hands it to the next client, so many clients share a few server connections.
+- Locally, PgBouncer plays RDS Proxy's part, so the same path is exercised. `WORKER_REPLICAS=20 npm run stress -- --stock 10000` ran 20 workers with 21 connections into PgBouncer, and PostgreSQL never saw more than 10. Every check passed.
+
+**Cost.**
+
+- One more hop, and one more component to run.
+- Transaction pooling forbids state that outlives a transaction: session-level advisory locks, `SET`, `LISTEN`. The code uses none of them. The migration lock is transaction-scoped (`pg_advisory_xact_lock`) for this reason; a session lock and its unlock could land on different server connections and leave the lock held forever.
+- Tests and local development (`npm run dev`) connect to PostgreSQL directly.
+
+## D16. Not built
 
 In production:
 
