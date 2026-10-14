@@ -1,0 +1,23 @@
+{
+  "name": "@flash-sale/shared",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Code shared by more than one backend app: types, message formats, key names, config helpers",
+  "type": "module",
+  "sideEffects": false,
+  "exports": {
+    "./config": "./src/config.ts",
+    "./logger": "./src/logger.ts",
+    "./order": "./src/order.ts",
+    "./rabbitmq": "./src/rabbitmq.ts",
+    "./redis-keys": "./src/redis-keys.ts",
+    "./sale": "./src/sale.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "pino": "^10.4.0"
+  }
+}

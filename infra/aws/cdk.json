@@ -1,0 +1,6 @@
+{
+  "app": "npx tsx bin/flash-sale.ts",
+  "context": {
+    "env": "dev"
+  }
+}
