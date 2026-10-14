@@ -39,6 +39,8 @@ export function feedbackForPurchase(response: PurchaseResponse): Feedback {
       };
     case 'sale_ended':
       return { tone: 'warning', title: 'The sale has ended' };
+    case 'sale_paused':
+      return SALE_PAUSED;
     default:
       return {
         tone: 'error',
@@ -57,6 +59,12 @@ export function feedbackForLookup(lookup: PurchaseLookup): Feedback {
         detail: `"${lookup.userId}" has not bought the item.`,
       };
 }
+
+export const SALE_PAUSED: Feedback = {
+  tone: 'warning',
+  title: 'Paused for a moment',
+  detail: 'We are double-checking the stock. Please try again in a few seconds.',
+};
 
 export const UNCONFIRMED_PURCHASE: Feedback = {
   tone: 'error',

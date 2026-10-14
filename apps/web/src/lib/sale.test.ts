@@ -21,6 +21,10 @@ describe('statusAt', () => {
     expect(statusAt(sale, at('2026-01-01T11:00:00.000Z'))).toBe('ended');
   });
 
+  it('trusts the server when the sale is paused for recovery', () => {
+    expect(statusAt({ ...sale, status: 'paused' }, at('2026-01-01T10:30:00.000Z'))).toBe('paused');
+  });
+
   it('is sold out during the sale once no stock is left', () => {
     expect(statusAt({ ...sale, remainingStock: 0 }, at('2026-01-01T10:30:00.000Z'))).toBe(
       'sold_out',

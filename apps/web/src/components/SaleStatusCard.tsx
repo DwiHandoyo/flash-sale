@@ -6,6 +6,7 @@ const BADGES: Record<SaleStatus, string> = {
   active: 'Live now',
   sold_out: 'Sold out',
   ended: 'Ended',
+  paused: 'Paused',
 };
 
 interface Props {
@@ -64,5 +65,7 @@ function headline(sale: Sale, status: SaleStatus, now: number): string {
       return 'Every unit has been claimed';
     case 'ended':
       return 'This sale is over';
+    case 'paused':
+      return 'Back in a moment';
   }
 }

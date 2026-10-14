@@ -12,6 +12,7 @@ describe('feedbackForPurchase', () => {
     ['sold_out', 'warning', 'Sold out'],
     ['sale_not_started', 'warning', 'Not open yet'],
     ['sale_ended', 'warning', 'The sale has ended'],
+    ['sale_paused', 'warning', 'Paused for a moment'],
     ['invalid_user_id', 'error', 'Please check your username or email'],
   ])('describes %s', (code, tone, title) => {
     expect(feedbackForPurchase({ code, message: 'server message', order })).toMatchObject({

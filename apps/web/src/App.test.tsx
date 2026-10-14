@@ -135,6 +135,51 @@ describe('App', () => {
     expect(await screen.findByText('You have secured an item')).toBeInTheDocument();
   });
 
+  it('shows a paused sale and keeps the buy button disabled', async () => {
+    mockApi({ sale: { ...liveSale(), status: 'paused' } });
+    render(<App />);
+
+    expect(await screen.findByText('Paused', { selector: '.badge' })).toBeInTheDocument();
+    expect(screen.getByText('Back in a moment')).toBeInTheDocument();
+    await enterUserId('alice');
+    expect(screen.getByRole('button', { name: 'Paused' })).toBeDisabled();
+  });
+
+  it('asks the buyer to try again when the sale pauses while buying', async () => {
+    mockApi({
+      purchase: () => json(503, { code: 'sale_paused', message: 'Paused' }),
+    });
+    render(<App />);
+
+    const user = await enterUserId('alice');
+    await user.click(await screen.findByRole('button', { name: 'Buy now' }));
+
+    expect(await screen.findByText('Paused for a moment')).toBeInTheDocument();
+  });
+
+  it('checks the order status when the service could not confirm the purchase', async () => {
+    mockApi({
+      purchase: () => json(503, { code: 'service_unavailable', message: 'Unavailable' }),
+      lookup: () => json(200, { userId: 'alice', purchased: false }),
+    });
+    render(<App />);
+
+    const user = await enterUserId('alice');
+    await user.click(await screen.findByRole('button', { name: 'Buy now' }));
+
+    expect(await screen.findByText('We could not confirm your purchase')).toBeInTheDocument();
+  });
+
+  it('explains a paused sale when checking a purchase', async () => {
+    mockApi({ lookup: () => json(503, { code: 'sale_paused', message: 'Paused' }) });
+    render(<App />);
+
+    const user = await enterUserId('alice');
+    await user.click(screen.getByRole('button', { name: 'Check my purchase' }));
+
+    expect(await screen.findByText('Paused for a moment')).toBeInTheDocument();
+  });
+
   it('lets a buyer check their purchase', async () => {
     mockApi({ lookup: () => json(200, { userId: 'bob', purchased: false }) });
     render(<App />);

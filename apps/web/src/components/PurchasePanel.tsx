@@ -1,9 +1,10 @@
 import { useId, useState, type FormEvent } from 'react';
 
-import { attemptPurchase, lookupPurchase, type SaleStatus } from '../api';
+import { attemptPurchase, lookupPurchase, SalePausedError, type SaleStatus } from '../api';
 import {
   feedbackForLookup,
   feedbackForPurchase,
+  SALE_PAUSED,
   UNCONFIRMED_PURCHASE,
   type Feedback,
 } from '../lib/feedback';
@@ -17,6 +18,7 @@ const BUY_LABELS: Record<SaleStatus, string> = {
   active: 'Buy now',
   sold_out: 'Sold out',
   ended: 'Sale ended',
+  paused: 'Paused',
 };
 
 interface Props {
@@ -62,6 +64,7 @@ export function PurchasePanel({ status, onPurchaseSettled }: Props) {
     try {
       setFeedback(feedbackForLookup(await lookupPurchase(trimmedUserId)));
     } catch (error) {
+      if (error instanceof SalePausedError) return setFeedback(SALE_PAUSED);
       setFeedback({
         tone: 'error',
         title: 'Could not check your purchase',
