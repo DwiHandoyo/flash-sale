@@ -46,6 +46,8 @@ export async function recover(
   const persisted = await orders.listBySale(saleId);
   await saleState.rebuild(sale, persisted);
   await saleState.resume();
+  // Released reservations can turn "sold out" back into "active"; do not let the CDN hide that.
+  await deps.statusCache.refresh();
 
   const remainingStock = Math.max(0, sale.totalStock - persisted.length);
   logger.info({ saleId, orders: persisted.length, remainingStock }, 'Sale recovered and resumed');

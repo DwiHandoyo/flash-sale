@@ -40,6 +40,12 @@ export interface QueueAdmin {
   purge(): Promise<void>;
 }
 
+/** The CDN's cached copy of GET /api/sale (docs/07, D16). */
+export interface StatusCache {
+  /** Replaces the cached sale status after a job changed the sale outside a purchase. */
+  refresh(): Promise<void>;
+}
+
 export interface OrderPublisher {
   /** Resolves once RabbitMQ has confirmed the message is stored. */
   publish(message: OrderMessage): Promise<void>;
@@ -53,6 +59,7 @@ export interface JobDependencies {
   readonly saleState: SaleStateStore;
   readonly queues: QueueAdmin;
   readonly publisher: OrderPublisher;
+  readonly statusCache: StatusCache;
   readonly migrate: () => Promise<void>;
   /** Resets the sale row and deletes its orders, in one transaction. */
   readonly resetPersistedSale: (sale: SaleDefinition) => Promise<void>;

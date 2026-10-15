@@ -36,6 +36,8 @@ x-jobs: &jobs
     RABBITMQ_URL: *rabbitmq-url
     RABBITMQ_MANAGEMENT_URL: *rabbitmq-management-url
     DATABASE_URL: *database-url
+    # reset and recover refresh the sale status cached by nginx, the local CDN (docs/07, D16).
+    CDN_REFRESH_URL: http://web:8080/api/sale
   depends_on:
     redis: { condition: service_healthy }
     rabbitmq: { condition: service_healthy }

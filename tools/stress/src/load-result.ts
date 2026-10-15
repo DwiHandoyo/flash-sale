@@ -15,4 +15,12 @@ export interface LoadResult {
   readonly winners: Record<string, string>;
   /** Users who were given two different order IDs. Must stay empty. */
   readonly conflictingOrders: string[];
+  /** Status polls, with --pollers: how the CDN cache answered them (its X-Cache-Status). */
+  readonly polls?: {
+    readonly pollers: number;
+    readonly requests: number;
+    readonly cache: Record<string, number>;
+    readonly latencyMs: LatencySummary;
+    readonly timeline: TimelineBucket[];
+  };
 }

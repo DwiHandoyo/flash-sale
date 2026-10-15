@@ -1,6 +1,7 @@
 import type { FastifyPluginAsync } from 'fastify';
 
 import type { UseCases } from '../../app/use-cases';
+import { saleStatusCacheControl } from './cache-control';
 import { toOrderDto, toPurchaseResponse, toSaleStatusDto } from './responses';
 import {
   errorResponse,
@@ -21,8 +22,8 @@ export const apiRoutes: FastifyPluginAsync<{ useCases: UseCases }> = async (app,
     { schema: { response: { 200: saleStatusResponse, '5xx': errorResponse } } },
     async (_request, reply) => {
       const view = await useCases.getSaleStatus();
-      // Every client polls this endpoint; one second of shared caching lets a CDN absorb it.
-      void reply.header('cache-control', 'public, max-age=1');
+      // Every client polls this endpoint; shared caching lets a CDN absorb most of it.
+      void reply.header('cache-control', saleStatusCacheControl(view));
       return toSaleStatusDto(view);
     },
   );

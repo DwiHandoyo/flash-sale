@@ -44,7 +44,7 @@ flowchart LR
 | Component                            | Job                                                                                                                | Keeps state? |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------ | ------------ |
 | React app                            | Shows the status and countdown, sends the purchase, shows the result                                               | No           |
-| nginx                                | Serves the React files and spreads API requests over the servers                                                   | No           |
+| nginx                                | Serves the React files, caches the sale status like a CDN, and spreads API requests over the servers               | No           |
 | API server (Fastify)                 | Validates input, reserves the unit in Redis, hands the order to RabbitMQ, answers the user                         | No           |
 | Redis                                | Decides purchases. It holds the remaining stock, who bought, and the sale window                                   | **Yes**      |
 | RabbitMQ                             | Keeps each new order safe until a worker has saved it                                                              | **Yes**      |
@@ -93,7 +93,7 @@ The repository has one app for each role. Each app is deployed and scaled on its
 
 ## Scaling further (not built)
 
-- Serve the sale status from a CDN. The API already sends `Cache-Control: max-age=1`.
+- Serve the sale status from a CDN. The API already tells the CDN how long to reuse it, by the sale's phase and remaining stock (D16).
 - Put a virtual waiting room in front of the sale for extreme spikes.
 - Once the item is sold out, let each API server answer "sold out" from memory instead of asking Redis.
 - Spread many sales over a Redis Cluster. All keys of one sale share a hash tag, so they stay on the same node.

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-A take-home flash sale system: one product, limited stock, one item per user, a configurable sale window. The scope is the assignment only: anything beyond it goes under "Not built" (docs/07, D16), not into the code.
+A take-home flash sale system: one product, limited stock, one item per user, a configurable sale window. The scope is the assignment only: anything beyond it goes under "Not built" (docs/07, D17), not into the code.
 
 All documentation, README text, code comments and docstrings are written in English.
 
@@ -52,7 +52,7 @@ npm run build               # esbuild bundles each backend app to dist/main.mjs;
   - One-off jobs: `docker compose run --rm jobs reset --stock 100 --starts-in 10 --duration 3600`; `reconcile` and `recover` work the same way.
   - An existing volume keeps its old sale, so reset it before a demo.
 - **Stress test:** `npm run stress`.
-  - Options: `--users`, `--stock`, `--connections`, `--double-click`, `--chaos kill-api|kill-worker|stop-postgres|restart-redis|wipe-redis`.
+  - Options: `--users`, `--stock`, `--connections`, `--double-click`, `--pollers` (users polling the status, to measure the CDN cache), `--chaos kill-api|kill-worker|stop-postgres|restart-redis|wipe-redis`.
   - Environment variables: `REDIS_APPENDFSYNC=everysec` for the fsync comparison, `WORKER_REPLICAS=20` to scale the workers out.
   - It rebuilds the images (cached), starts the stack and resets the sale. It exits with 1 if any of the 8 data-store checks fails.
   - The orchestrator runs on the host (`tools/stress/src/run.ts`). The load generator (`load.ts`) runs as the `stress` Compose service inside the Docker network.
@@ -87,7 +87,7 @@ The API never touches PostgreSQL, and the worker never touches Redis.
 - **Contract test:** `apps/api/test/contracts/sale-store-contract.ts` runs against the in-memory fake in the unit tests and against Redis in the integration tests. Keep both implementations in step.
 - **Docker:**
   - A single root `Dockerfile` has one target per app (`api`, `worker`, `jobs`, `stress`, `web`). Backend images contain only Node.js and the bundle.
-  - `web` is nginx (`apps/web/nginx.conf`). It serves the React build and balances `/api` over 3 API replicas. It retries failed requests, including `POST`, on another server, which is safe because purchases are idempotent.
+  - `web` is nginx (`apps/web/nginx.conf`). It serves the React build, plays the CDN (caches API responses as their `Cache-Control` allows, adds `X-Cache-Status`), and balances `/api` over 3 API replicas. It retries failed requests, including `POST`, on another server, which is safe because purchases are idempotent.
   - The worker and the jobs reach PostgreSQL through PgBouncer, the local stand-in for RDS Proxy.
 
 ## Constraints that are easy to break
@@ -97,4 +97,5 @@ The API never touches PostgreSQL, and the worker never touches Redis.
 - **The images run `node main.mjs` without `--enable-source-maps` on purpose.** Source-mapped stack traces blocked the event loop during a Redis outage and caused `503 overloaded`.
 - **The API's "not started yet" shortcut uses the server clock.** This is a documented exception to "Redis's clock decides" (docs/07, D6).
 - **`docker kill` counts as a manual stop, so Docker does not restart the container.** To simulate a crash, kill the process inside the container: `pkill -9 -f main.mjs`.
+- **The CDN cache time for `GET /api/sale` is chosen by the API** in `apps/api/src/adapters/http/cache-control.ts`, and capped by `maxTtl` in the CloudFront cache policy (`infra/aws/lib/app-stack.ts`, 30 s). Change both together. Keep 1 s before the opening: the buy button unlocks from `serverTime`. A job that changes the sale outside a purchase (`reset`, `recover`) must refresh the cached status (`StatusCache`), after the API's own 0.5 s cache has expired.
 - **`infra/aws/` is a design-only AWS CDK app.** It is not a workspace, its dependencies are not installed, and it has never been synthesised or deployed. Keep its environment variable names aligned with each app's `config.ts`.

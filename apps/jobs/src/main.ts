@@ -21,6 +21,7 @@ import {
 } from '@flash-sale/shared/postgres';
 import { createRedisClient, waitForRedis } from '@flash-sale/shared/redis-client';
 
+import { CdnStatusCache } from './adapters/http/cdn-status-cache';
 import { RabbitMqQueueAdmin } from './adapters/rabbitmq/rabbitmq-queue-admin';
 import { RedisSaleStateStore } from './adapters/redis/redis-sale-state-store';
 import { bootstrap } from './app/bootstrap';
@@ -65,6 +66,9 @@ const deps: JobDependencies = {
     managementUrl: config.rabbitMqManagementUrl,
   }),
   publisher,
+  statusCache: config.cdnRefreshUrl
+    ? new CdnStatusCache({ url: config.cdnRefreshUrl, logger, sleep: (ms) => sleep(ms) })
+    : { refresh: async () => undefined },
   migrate: () => migrate(pool),
   resetPersistedSale: (sale) =>
     withTransaction(pool, async (client) => {

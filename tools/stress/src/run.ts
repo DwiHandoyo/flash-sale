@@ -3,6 +3,7 @@
  * RabbitMQ directly (docs/09, "Stress test"). Exits with 1 when a check fails.
  *
  *   npm run stress -- [--users 10000] [--stock 100] [--connections 500] [--double-click 0.1]
+ *                     [--pollers 0]
  *                     [--chaos kill-api|kill-worker|stop-postgres|restart-redis|wipe-redis]
  *                     [--chaos-after 1000]
  *
@@ -34,14 +35,15 @@ const { values } = parseArgs({
     stock: { type: 'string' },
     connections: { type: 'string', default: '500' },
     'double-click': { type: 'string', default: '0.1' },
+    pollers: { type: 'string', default: '0' },
     chaos: { type: 'string' },
     'chaos-after': { type: 'string', default: '1000' },
   },
 });
 
-function positiveInt(name: string, raw: string): number {
+function positiveInt(name: string, raw: string, min = 1): number {
   const value = Number(raw);
-  if (!Number.isInteger(value) || value < 1) fail(`--${name} must be a positive whole number`);
+  if (!Number.isInteger(value) || value < min) fail(`--${name} must be a whole number ≥ ${min}`);
   return value;
 }
 
@@ -52,6 +54,7 @@ function fail(message: string): never {
 
 const users = positiveInt('users', values.users);
 const connections = positiveInt('connections', values.connections);
+const pollers = positiveInt('pollers', values.pollers, 0);
 const chaosAfterMs = positiveInt('chaos-after', values['chaos-after']);
 const doubleClickShare = Number(values['double-click']);
 if (!(doubleClickShare >= 0 && doubleClickShare <= 1)) fail('--double-click must be from 0 to 1');
@@ -122,6 +125,7 @@ async function runLoad(): Promise<{ load: LoadResult; fault?: Promise<void> }> {
       `--users=${users}`,
       `--connections=${connections}`,
       `--double-click=${doubleClickShare}`,
+      `--pollers=${pollers}`,
     ],
     {
       onStderrLine: (line) => {
@@ -263,7 +267,8 @@ try {
   ]);
 
   step(
-    `Starting ${n(users)} users (${n(doubleClickers)} double-click) on ${n(connections)} connections`,
+    `Starting ${n(users)} users (${n(doubleClickers)} double-click) on ${n(connections)} connections` +
+      (pollers > 0 ? `, plus ${n(pollers)} pollers` : ''),
   );
   const { load, fault } = await runLoad();
   step(`Load finished in ${(load.durationMs / 1_000).toFixed(2)} s`);

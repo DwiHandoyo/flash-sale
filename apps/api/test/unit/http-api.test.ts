@@ -60,13 +60,13 @@ describe('HTTP API', () => {
   });
 
   describe('GET /api/sale', () => {
-    it('returns the sale status with one second of shared caching', async () => {
+    it('returns the sale status, cacheable by a CDN for a time that suits its phase', async () => {
       await startSale();
 
       const response = await status();
 
       expect(response.statusCode).toBe(200);
-      expect(response.headers['cache-control']).toBe('public, max-age=1');
+      expect(response.headers['cache-control']).toBe('public, max-age=0, s-maxage=5');
       expect(response.json()).toEqual({
         saleId: 'drop',
         status: 'active',

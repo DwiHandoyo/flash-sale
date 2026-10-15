@@ -47,7 +47,7 @@ flowchart TD
 2. **Drain.** Workers keep moving orders from RabbitMQ to PostgreSQL; they do not need Redis. The job waits until no order is in flight, meaning none waits in the queue and none is held by a worker. Shortcut: if PostgreSQL already holds `totalStock` orders, the job stops waiting. See "How the job knows the queue is drained" below.
 3. **Check the dead letters.** Orders in the dead-letter queue are not in PostgreSQL. If the job ignored them, it would count too few sold units and could oversell. So when the queue is not empty, the job stops and raises an alarm.
 4. **Rebuild.** buyers = every order in PostgreSQL, and `remainingStock` = `totalStock` − number of orders.
-5. **Resume.** The job removes `paused`, and the sale continues.
+5. **Resume.** The job removes `paused`, and the sale continues. It then refreshes the sale status cached at the CDN, which may still say "paused" or "sold out" (see D16 in [Decisions](07-decisions.md)).
 
 If the job cannot finish, it exits with an error and leaves the sale paused. That happens when PostgreSQL is down too, when the queue does not drain within `DRAIN_TIMEOUT_MS` (5 minutes, for example because no worker runs), or when dead letters are waiting. An operator fixes the cause and runs it again; the next bootstrap also runs it, because it finds the sale still paused. **Correctness wins over availability.** This is a rare event.
 

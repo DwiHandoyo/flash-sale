@@ -20,14 +20,15 @@ An integration test runs a naive "read the stock, then decrement it" version und
 
 **Run it** with `npm run stress` (Docker and `npm ci` are all it needs). It builds and starts the whole system, resets the sale, runs the load from a container inside the Docker network, then checks the data stores. It exits with code 1 when a check fails.
 
-| Option           | Default                              | Meaning                                              |
-| ---------------- | ------------------------------------ | ---------------------------------------------------- |
-| `--users`        | 10,000                               | Users who press "Buy"                                |
-| `--stock`        | 100 (with `--chaos`: half the users) | Units on sale                                        |
-| `--connections`  | 500                                  | Users waiting for an answer at the same moment       |
-| `--double-click` | 0.1                                  | Share of users who click twice                       |
-| `--chaos`        | none                                 | A fault to inject during the run (see Chaos runs)    |
-| `--chaos-after`  | 1000                                 | When to inject it, in milliseconds after the opening |
+| Option           | Default                              | Meaning                                                                                        |
+| ---------------- | ------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| `--users`        | 10,000                               | Users who press "Buy"                                                                          |
+| `--stock`        | 100 (with `--chaos`: half the users) | Units on sale                                                                                  |
+| `--connections`  | 500                                  | Users waiting for an answer at the same moment                                                 |
+| `--double-click` | 0.1                                  | Share of users who click twice                                                                 |
+| `--pollers`      | 0                                    | Extra users who poll the sale status every 2 s during the sale, to measure the CDN cache (D16) |
+| `--chaos`        | none                                 | A fault to inject during the run (see Chaos runs)                                              |
+| `--chaos-after`  | 1000                                 | When to inject it, in milliseconds after the opening                                           |
 
 Example: `npm run stress -- --users 20000 --stock 500`.
 
@@ -49,6 +50,8 @@ Example: `npm run stress -- --users 20000 --stock 500`.
 **Report.** The number of answers per outcome, throughput, latency (p50, p95, p99, max), and the answers per second, which shows what a fault did and when.
 
 **`appendfsync always` vs `everysec` (D7).** `REDIS_APPENDFSYNC=everysec npm run stress` restarts Redis with `everysec`; the next plain `npm run stress` switches it back. This measures what `always` costs. It cannot show what `everysec` risks: with both settings, Redis hands each write to the operating system before it replies, so only a crash of the machine itself loses data under `everysec`, and killing a container is not such a crash.
+
+**CDN cache (D16).** `npm run stress -- --pollers 10000` reports how the status polls were answered: from nginx's cache (`HIT`) or by an API server. In one run, 99.7% of 13,415 polls came from the cache and 41 reached the API. The pollers share the laptop's CPU with everything else, so with many pollers the load generator itself slows down: their latency shows queueing in the generator, not the cache.
 
 **Scaled-out workers (D15).** `WORKER_REPLICAS=20 npm run stress -- --stock 10000` runs 20 workers, as when many Lambda instances start at once. They opened 21 connections into PgBouncer, and PostgreSQL never saw more than 10. Every check passed.
 

@@ -77,6 +77,13 @@ describe('jobs with real Redis, PostgreSQL and RabbitMQ', () => {
       queue: queues.orders,
     });
     await publisher.start();
+    // Counts how often the jobs ask the CDN to refresh its copy of the sale status.
+    const statusCache = {
+      refreshes: 0,
+      refresh: async () => {
+        statusCache.refreshes += 1;
+      },
+    };
 
     const deps: JobDependencies = {
       saleId: sale.id,
@@ -90,6 +97,7 @@ describe('jobs with real Redis, PostgreSQL and RabbitMQ', () => {
         queues,
       }),
       publisher,
+      statusCache,
       migrate: () => migrate(pool),
       resetPersistedSale: (definition) =>
         withTransaction(pool, async (client) => {
@@ -110,7 +118,7 @@ describe('jobs with real Redis, PostgreSQL and RabbitMQ', () => {
       const keys = saleKeys(sale.id);
       await redis.del(keys.sale, keys.buyers);
     });
-    return { sale, queues, deps, publisher };
+    return { sale, queues, deps, publisher, statusCache };
   }
 
   const keysOf = (sale: SaleDefinition) => saleKeys(sale.id);
@@ -195,7 +203,7 @@ describe('jobs with real Redis, PostgreSQL and RabbitMQ', () => {
   });
 
   it('recover pauses the sale and waits for the orders still in flight', async () => {
-    const { sale, queues, deps, publisher } = await setup(10);
+    const { sale, queues, deps, publisher, statusCache } = await setup(10);
     await bootstrap(deps, sale);
     const alice = order('alice');
     await deps.orders.saveOrders(sale.id, [alice]);
@@ -221,6 +229,8 @@ describe('jobs with real Redis, PostgreSQL and RabbitMQ', () => {
       paused: false,
       buyers: ['alice', 'bob', 'carol'],
     });
+    // The CDN's copy may still say "sold out" or "paused".
+    expect(statusCache.refreshes).toBe(1);
   });
 
   it('recover also waits for orders a worker holds without having acknowledged them', async () => {
@@ -280,7 +290,7 @@ describe('jobs with real Redis, PostgreSQL and RabbitMQ', () => {
   });
 
   it('reset restarts the sale: full stock, no buyers, no orders, no queued messages', async () => {
-    const { sale, queues, deps, publisher } = await setup(10);
+    const { sale, queues, deps, publisher, statusCache } = await setup(10);
     await bootstrap(deps, sale);
     const alice = order('alice');
     await reserveInRedis(sale, [alice]);
@@ -293,5 +303,7 @@ describe('jobs with real Redis, PostgreSQL and RabbitMQ', () => {
     expect(await deps.sales.find(sale.id)).toMatchObject({ totalStock: 3, soldCount: 0 });
     expect(await deps.orders.countBySale(sale.id)).toBe(0);
     expect((await channel.checkQueue(queues.orders)).messageCount).toBe(0);
+    // The CDN's copy still describes the old sale.
+    expect(statusCache.refreshes).toBe(1);
   });
 });

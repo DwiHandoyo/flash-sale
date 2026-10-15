@@ -48,6 +48,7 @@ export function formatReport({
           .map(([outcome, count]) => `${outcome} ${n(count)}`)
           .join(' · '),
     ),
+    ...formatPolls(load.polls),
     '',
     'Checks',
     ...checks.map((check) => `  ${check.passed ? '✓' : '✗'} ${check.name}: ${check.detail}`),
@@ -57,4 +58,34 @@ export function formatReport({
       : `FAILED (${checks.length - passed} of ${checks.length} checks)`,
     '',
   ].join('\n');
+}
+
+/** Answers that did not reach an API server. */
+const FROM_CACHE = new Set(['HIT', 'STALE', 'UPDATING']);
+
+function formatPolls(polls: LoadResult['polls']): string[] {
+  if (!polls) return [];
+  const answers = Object.entries(polls.cache).sort(([, a], [, b]) => b - a);
+  const width = Math.max(...answers.map(([answer]) => answer.length));
+  const fromCache = answers
+    .filter(([answer]) => FROM_CACHE.has(answer))
+    .reduce((sum, [, count]) => sum + count, 0);
+  const share = polls.requests > 0 ? (fromCache / polls.requests) * 100 : 0;
+
+  return [
+    '',
+    `Status polls: ${n(polls.requests)} from ${n(polls.pollers)} pollers, each every 2 s`,
+    ...answers.map(([answer, count]) => `  ${answer.padEnd(width)}  ${n(count).padStart(7)}`),
+    `  ${share.toFixed(1)}% answered by the CDN cache; ${n(polls.requests - fromCache)} reached an API server`,
+    `Poll latency: p50 ${ms(polls.latencyMs.p50)} · p95 ${ms(polls.latencyMs.p95)} · p99 ${ms(polls.latencyMs.p99)} · max ${ms(polls.latencyMs.max)}`,
+    'Status polls by the second they were sent in',
+    ...polls.timeline.map(
+      ({ second, outcomes }) =>
+        `  ${String(second).padStart(3)} s  ` +
+        Object.entries(outcomes)
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([answer, count]) => `${answer} ${n(count)}`)
+          .join(' · '),
+    ),
+  ];
 }

@@ -2,24 +2,25 @@
 
 > **In short:** the table lists every significant choice. The sections below explain each one in a few lines: what we chose, what else we considered, and what it costs us.
 
-|     | Decision                                                                                                   | Instead of                                                 | Main reason                                                         |
-| --- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------- |
-| D1  | A Redis script decides each purchase atomically                                                            | Locking a database row                                     | Fast, with no lock queue under contention                           |
-| D2  | RabbitMQ carries orders to PostgreSQL and confirms each one before the user is answered                    | A queue inside Redis (Redis Streams)                       | Every order has a second safe copy before "you got it"              |
-| D3  | PostgreSQL is written in the background                                                                    | Writing to it on every request                             | The database cannot become the bottleneck                           |
-| D4  | Unconfirmed reservations are completed, never cancelled                                                    | Expiring them                                              | Cancelling could sell a unit twice                                  |
-| D5  | Buying again returns your original order                                                                   | Answering with an error                                    | Retries are safe for users and for the load balancer                |
-| D6  | Redis's clock decides the sale window                                                                      | Each API server's clock                                    | Clock drift cannot open the sale early or keep it open late         |
-| D7  | Redis syncs every write to disk before replying                                                            | Syncing once per second                                    | A restart needs no recovery; cheap because only winners write       |
-| D8  | One repository with a separate app per role (API, worker, jobs, web)                                       | One app doing everything, or microservices split by domain | Each app deploys and scales on its own; the rules stay together     |
-| D9  | Fastify for the API                                                                                        | Express, NestJS                                            | Fast, with built-in validation and little ceremony                  |
-| D10 | The app polls the sale status every 2 s                                                                    | WebSockets or server-sent events                           | Simple and cacheable                                                |
-| D11 | Fail fast when overloaded                                                                                  | Queueing requests until they time out                      | Latency stays predictable and servers stay healthy                  |
-| D12 | The sale opens and closes by the clock, checked on every request                                           | A scheduler switching it on and off                        | Exact to the millisecond, with no job that can fail                 |
-| D13 | In production, workers run on Lambda and the API on containers scaled before the sale                      | Serverless everywhere, or containers everywhere            | Each part runs on what fits its load                                |
-| D14 | Production infrastructure as code with the AWS CDK in TypeScript, as a design only                         | Terraform, or deploying it                                 | Same language as the project; the assignment asks for no deployment |
-| D15 | Workers and jobs reach PostgreSQL through a connection pooler (PgBouncer locally, RDS Proxy in production) | Every instance connecting directly                         | Scaled-out workers cannot exhaust PostgreSQL's connections          |
-| D16 | No login, payment, bot protection or rate limiting                                                         | Building them                                              | Out of scope; where they would go is noted                          |
+|     | Decision                                                                                                   | Instead of                                                 | Main reason                                                                    |
+| --- | ---------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------ |
+| D1  | A Redis script decides each purchase atomically                                                            | Locking a database row                                     | Fast, with no lock queue under contention                                      |
+| D2  | RabbitMQ carries orders to PostgreSQL and confirms each one before the user is answered                    | A queue inside Redis (Redis Streams)                       | Every order has a second safe copy before "you got it"                         |
+| D3  | PostgreSQL is written in the background                                                                    | Writing to it on every request                             | The database cannot become the bottleneck                                      |
+| D4  | Unconfirmed reservations are completed, never cancelled                                                    | Expiring them                                              | Cancelling could sell a unit twice                                             |
+| D5  | Buying again returns your original order                                                                   | Answering with an error                                    | Retries are safe for users and for the load balancer                           |
+| D6  | Redis's clock decides the sale window                                                                      | Each API server's clock                                    | Clock drift cannot open the sale early or keep it open late                    |
+| D7  | Redis syncs every write to disk before replying                                                            | Syncing once per second                                    | A restart needs no recovery; cheap because only winners write                  |
+| D8  | One repository with a separate app per role (API, worker, jobs, web)                                       | One app doing everything, or microservices split by domain | Each app deploys and scales on its own; the rules stay together                |
+| D9  | Fastify for the API                                                                                        | Express, NestJS                                            | Fast, with built-in validation and little ceremony                             |
+| D10 | The app polls the sale status every 2 s                                                                    | WebSockets or server-sent events                           | Simple and cacheable                                                           |
+| D11 | Fail fast when overloaded                                                                                  | Queueing requests until they time out                      | Latency stays predictable and servers stay healthy                             |
+| D12 | The sale opens and closes by the clock, checked on every request                                           | A scheduler switching it on and off                        | Exact to the millisecond, with no job that can fail                            |
+| D13 | In production, workers run on Lambda and the API on containers scaled before the sale                      | Serverless everywhere, or containers everywhere            | Each part runs on what fits its load                                           |
+| D14 | Production infrastructure as code with the AWS CDK in TypeScript, as a design only                         | Terraform, or deploying it                                 | Same language as the project; the assignment asks for no deployment            |
+| D15 | Workers and jobs reach PostgreSQL through a connection pooler (PgBouncer locally, RDS Proxy in production) | Every instance connecting directly                         | Scaled-out workers cannot exhaust PostgreSQL's connections                     |
+| D16 | The CDN's cache time for the sale status follows the sale's phase and remaining stock                      | One fixed cache time                                       | Polling is absorbed when the answer is calm, and the last units are shown live |
+| D17 | No login, payment, bot protection or rate limiting                                                         | Building them                                              | Out of scope; where they would go is noted                                     |
 
 ## D1. A Redis script decides each purchase
 
@@ -177,7 +178,37 @@ Terraform would be the choice for a multi-cloud setup.
 - Transaction pooling forbids state that outlives a transaction: session-level advisory locks, `SET`, `LISTEN`. The code uses none of them. The migration lock is transaction-scoped (`pg_advisory_xact_lock`) for this reason; a session lock and its unlock could land on different server connections and leave the lock held forever.
 - Tests and local development (`npm run dev`) connect to PostgreSQL directly.
 
-## D16. Not built
+## D16. The CDN's cache time follows the sale's phase and stock
+
+**Choice.** `GET /api/sale` tells a CDN how long it may reuse the answer (`s-maxage`), while browsers always revalidate (`max-age=0`). CloudFront follows it in production. Locally, nginx plays the CDN with the same rule: it caches an API response exactly as long as its `Cache-Control` allows, and adds `X-Cache-Status` (HIT or not) to every answer.
+
+| Phase                       | CDN reuses the answer for |
+| --------------------------- | ------------------------- |
+| Before the opening          | 1 s                       |
+| Selling, more than 80% left | 5 s                       |
+| Selling, more than 40% left | 3 s                       |
+| Selling, more than 20% left | 1 s                       |
+| Selling, 20% or less left   | Not cached (`no-store`)   |
+| Sold out or ended           | 30 s                      |
+| Paused for recovery         | Not cached                |
+
+**Why.**
+
+- The CDN absorbs the polling: thousands of users become about one request per edge location per cache period.
+- The time follows how soon the answer is likely to change. While the last units go, users watch the number, so the answer comes straight from the API. Once the sale is sold out or ended, nothing changes any more.
+- Before the opening the time stays at 1 s. The app unlocks the buy button from `serverTime`, so an older copy would unlock it later for some users than for others.
+- A paused sale is never cached, so it reopens for everyone at once after recovery.
+
+**Cost.**
+
+- The stock shown can be a few seconds old, and two edge locations can show slightly different numbers. The purchase itself is always decided by Redis, so this never causes an oversell.
+- While 20% or less is left, every poll reaches the API, so the API must still be sized for the full polling load. In a flash sale this phase is short.
+- The rule lives in two places: the API picks the time ([`cache-control.ts`](../apps/api/src/adapters/http/cache-control.ts)), and the CloudFront cache policy caps it at 30 s. They must stay aligned.
+- A job that changes the sale outside a purchase leaves the cached copy stale: `reset` starts a new sale, and `recover` can turn "sold out" back into "active". Both refresh the copy: in production with a CloudFront invalidation, locally with a request carrying `X-Cache-Refresh: 1`, which nginx answers fresh and stores in place of the old copy. The job waits 1 s first, longer than the API's own 0.5 s status cache; otherwise the CDN could store the old state again for up to 30 s.
+
+**Measured locally.** `npm run stress -- --pollers 10000` adds 10,000 users who poll the status every 2 s during the sale: 13,415 polls, 99.7% answered by the cache, 41 reached an API server, and every check passed. A trace of a run with 10,000 units showed the cache time step from 5 s to 3 s, 1 s, `no-store` and finally 30 s as the stock sold out.
+
+## D17. Not built
 
 In production:
 

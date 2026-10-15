@@ -262,11 +262,12 @@ export class AppStack extends Stack {
       autoDeleteObjects: true,
     });
     const apiCachePolicy = new cloudfront.CachePolicy(this, 'ApiCachePolicy', {
-      // Follow the API's Cache-Control header: GET /api/sale (max-age=1) is cached for one
-      // second at the edge, and responses without the header are not cached at all.
+      // Follow the API's Cache-Control header: GET /api/sale sends s-maxage from 1 to 30 s, or
+      // no-store, depending on the sale's phase and stock (docs/07, D16). Responses without the
+      // header are not cached at all. maxTtl caps it; keep it equal to the API's longest time.
       minTtl: Duration.seconds(0),
       defaultTtl: Duration.seconds(0),
-      maxTtl: Duration.seconds(1),
+      maxTtl: Duration.seconds(30),
       headerBehavior: cloudfront.CacheHeaderBehavior.none(),
       queryStringBehavior: cloudfront.CacheQueryStringBehavior.none(),
       cookieBehavior: cloudfront.CacheCookieBehavior.none(),
@@ -289,6 +290,17 @@ export class AppStack extends Stack {
         },
       },
     });
+    // reset and recover refresh the cached sale status with an invalidation (docs/07, D16).
+    jobsTask.defaultContainer?.addEnvironment('CDN_DISTRIBUTION_ID', distribution.distributionId);
+    jobsTask.taskRole.addToPrincipalPolicy(
+      new iam.PolicyStatement({
+        actions: ['cloudfront:CreateInvalidation'],
+        resources: [
+          `arn:aws:cloudfront::${this.account}:distribution/${distribution.distributionId}`,
+        ],
+      }),
+    );
+
     // apps/web/dist is built by the pipeline before `cdk deploy`.
     new s3deploy.BucketDeployment(this, 'WebFiles', {
       sources: [s3deploy.Source.asset(`${repoRoot}/apps/web/dist`)],

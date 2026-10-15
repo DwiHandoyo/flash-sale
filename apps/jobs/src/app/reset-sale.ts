@@ -17,6 +17,8 @@ export async function resetSale(deps: JobDependencies, sale: SaleDefinition): Pr
   await deps.resetPersistedSale(sale);
   // Redis last: the sale only becomes active once everything behind it is clean.
   await saleState.reset(sale);
+  // The CDN may still hold the old sale's status, for up to 30 s if it had sold out.
+  await deps.statusCache.refresh();
 
   logger.info(
     {

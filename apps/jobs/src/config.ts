@@ -29,6 +29,8 @@ export interface JobsConfig {
   readonly scheduleIntervalMs: number;
   /** The second reconciliation runs this long after `endsAt`, in case the first one failed. */
   readonly reconcileRetryDelayMs: number;
+  /** GET /api/sale behind the CDN, refreshed after reset and recover. Empty: no CDN to refresh. */
+  readonly cdnRefreshUrl: string;
 }
 
 /** Defaults match the local Docker Compose setup. */
@@ -60,6 +62,7 @@ export function loadConfig(env: Env = process.env): JobsConfig {
     drainTimeoutMs: readInt(env, 'DRAIN_TIMEOUT_MS', 300_000, { min: 1 }),
     scheduleIntervalMs: readInt(env, 'SCHEDULE_INTERVAL_MS', 15_000, { min: 100 }),
     reconcileRetryDelayMs: readInt(env, 'RECONCILE_RETRY_DELAY_MS', 300_000, { min: 0 }),
+    cdnRefreshUrl: readString(env, 'CDN_REFRESH_URL', ''),
   };
 }
 

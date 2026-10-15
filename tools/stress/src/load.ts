@@ -5,8 +5,9 @@
  * It opens its connections, waits for the sale to open, then has every user press "Buy" at that
  * moment, some of them twice. Each connection carries one request at a time, so `connections` is
  * the number of users waiting for an answer at any moment. A user who gets a 5xx or no answer
- * tries again a few times, as a person would. Progress goes to stderr; the result is one JSON line
- * on stdout.
+ * tries again a few times, as a person would. With --pollers, other users meanwhile poll the sale
+ * status every 2 s, as the app does, to show how much of it the CDN cache absorbs. Progress goes
+ * to stderr; the result is one JSON line on stdout.
  */
 import { performance } from 'node:perf_hooks';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -24,15 +25,26 @@ const { values } = parseArgs({
     connections: { type: 'string', default: '500' },
     'double-click': { type: 'string', default: '0.1' },
     retries: { type: 'string', default: '3' },
+    pollers: { type: 'string', default: '0' },
   },
 });
 const users = Number(values.users);
 const connections = Number(values.connections);
 const doubleClickShare = Number(values['double-click']);
 const maxRetries = Number(values.retries);
+const pollers = Number(values.pollers);
+/** How often each poller asks for the status, like the app (apps/web/src/hooks/useSaleStatus.ts). */
+const POLL_INTERVAL_MS = 2_000;
 
 const pool = new Pool(values.target, {
   connections,
+  keepAliveTimeout: 60_000,
+  keepAliveMaxTimeout: 600_000,
+  headersTimeout: 30_000,
+});
+// Status polls get their own connections, so they never wait behind purchases.
+const pollPool = new Pool(values.target, {
+  connections: Math.max(1, Math.min(pollers, 200)),
   keepAliveTimeout: 60_000,
   keepAliveMaxTimeout: 600_000,
   headersTimeout: 30_000,
@@ -135,6 +147,35 @@ const progress = setInterval(() => {
   report({ event: 'progress', elapsedMs: performance.now() - startedAt, answered: samples.length });
 }, 1_000);
 
+const polls: Sample[] = [];
+let purchasesDone = false;
+
+/** What answered a status poll: the CDN cache (HIT) or an API server (MISS, EXPIRED, …). */
+async function poll(): Promise<string> {
+  try {
+    const response = await pollPool.request({ method: 'GET', path: '/api/sale' });
+    await response.body.dump();
+    const cache = response.headers['x-cache-status'];
+    const answeredBy = typeof cache === 'string' ? cache : 'no X-Cache-Status';
+    return response.statusCode === 200 ? answeredBy : `${response.statusCode} ${answeredBy}`;
+  } catch {
+    return 'network error';
+  }
+}
+
+/** One user's open page: polls the status until the purchases are over. */
+async function poller(): Promise<void> {
+  // People did not all open the page at the same moment.
+  await sleep(Math.random() * POLL_INTERVAL_MS);
+  while (!purchasesDone) {
+    const sentAt = performance.now();
+    const outcome = await poll();
+    polls.push({ sentAt: sentAt - startedAt, latencyMs: performance.now() - sentAt, outcome });
+    await sleep(POLL_INTERVAL_MS);
+  }
+}
+const polling = Promise.all(Array.from({ length: pollers }, poller));
+
 let next = 0;
 async function user(userId: string): Promise<void> {
   for (let attempt = 0; ; attempt++) {
@@ -156,8 +197,10 @@ await Promise.all(
   }),
 );
 const durationMs = performance.now() - startedAt;
+purchasesDone = true;
+await polling;
 clearInterval(progress);
-await pool.close();
+await Promise.all([pool.close(), pollPool.close()]);
 
 const result: LoadResult = {
   users,
@@ -171,5 +214,15 @@ const result: LoadResult = {
     [...ordersByUser].map(([userId, orders]) => [userId, [...orders][0]!] as const),
   ),
   conflictingOrders: [...ordersByUser].filter(([, orders]) => orders.size > 1).map(([id]) => id),
+  polls:
+    pollers > 0
+      ? {
+          pollers,
+          requests: polls.length,
+          cache: countOutcomes(polls),
+          latencyMs: summarizeLatency(polls),
+          timeline: timeline(polls),
+        }
+      : undefined,
 };
 console.log(JSON.stringify(result));
