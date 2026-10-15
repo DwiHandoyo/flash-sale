@@ -7,7 +7,7 @@
 ```mermaid
 flowchart LR
     browser(["Browser (React app)"])
-    nginx["nginx: load balancer + static files"]
+    nginx["nginx: CDN cache, load balancer, static files"]
 
     subgraph apis["API servers: identical replicas, stateless"]
         api1["API 1"]
@@ -37,6 +37,7 @@ flowchart LR
     pgbouncer --> postgres
     recovery -.->|"rebuild after data loss"| redis
     recovery -.->|"read orders"| postgres
+    recovery -.->|"refresh cached status"| nginx
 ```
 
 ## Components

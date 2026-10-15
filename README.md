@@ -31,7 +31,7 @@ The sale's settings come from `SALE_TOTAL_STOCK`, `SALE_START_DELAY_SECONDS`, `S
 
 ```mermaid
 flowchart LR
-    browser(["Browser (React)"]) --> nginx["nginx"]
+    browser(["Browser (React)"]) --> nginx["nginx<br/>CDN cache + load balancer"]
     nginx --> apis["API servers ×3<br/>(stateless)"]
     apis -->|"1. reserve: one atomic script"| redis[("Redis<br/>stock, buyers, window")]
     apis -->|"2. publish, wait for confirm"| rabbit[["RabbitMQ<br/>order queue"]]
@@ -40,6 +40,7 @@ flowchart LR
     pgbouncer --> postgres[("PostgreSQL<br/>order records")]
     jobs["Jobs: bootstrap, reconcile, recover"] -.-> redis
     jobs -.-> postgres
+    jobs -.->|"refresh cached status"| nginx
 ```
 
 1. **nginx** serves the React app, caches the sale status like a CDN, and spreads API requests over three identical API servers.
