@@ -115,7 +115,6 @@ apps/api/src/
 | -------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
 | A DI container or NestJS-style decorators                      | Too much machinery for a handful of use cases                                                      |
 | Full clean architecture (entity classes, mappers, many layers) | Three layers are enough                                                                            |
-| CQRS or event sourcing                                         | No need for an event history                                                                       |
 | Saga                                                           | The only cross-system step is publishing, which confirms, retries and reconciliation already cover |
 | A circuit-breaker library                                      | Timeouts plus failing fast are enough                                                              |
 | Class hierarchies and generic repositories                     | Plain functions and small objects read better                                                      |
