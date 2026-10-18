@@ -112,6 +112,8 @@ npm run dev -w @flash-sale/worker
 npm run dev -w @flash-sale/web                # http://localhost:5173
 ```
 
+To build without Docker, `npm run build` bundles each backend app into `apps/<app>/dist/main.mjs` (run it with `node`) and builds the web app into `apps/web/dist`. The Docker images run these same builds.
+
 ## Tests
 
 ```bash
