@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 
 import { fetchSale, type Sale } from '../api';
+import { nextPollDelayMs, statusAt } from '../lib/sale';
 
 export interface SaleSnapshot {
   sale: Sale;
@@ -11,7 +12,10 @@ export interface SaleSnapshot {
 const POLL_INTERVAL_MS = 2_000;
 const MAX_RETRY_DELAY_MS = 15_000;
 
-/** Polls the sale status, backing off while the API is unreachable and pausing in hidden tabs. */
+/**
+ * Polls the sale status, backing off while the API is unreachable and pausing in hidden tabs. Polling
+ * slows down once the sale is sold out and stops once it has ended.
+ */
 export function useSaleStatus() {
   const [snapshot, setSnapshot] = useState<SaleSnapshot | null>(null);
   const [connectionLost, setConnectionLost] = useState(false);
@@ -23,6 +27,7 @@ export function useSaleStatus() {
     let failures = 0;
 
     const poll = async () => {
+      let nextDelay = nextPollDelayMs('active');
       if (!document.hidden) {
         const sentAt = Date.now();
         try {
@@ -32,13 +37,17 @@ export function useSaleStatus() {
           setSnapshot({ sale, clockOffsetMs });
           setConnectionLost(false);
           failures = 0;
+          nextDelay = nextPollDelayMs(statusAt(sale, Date.parse(sale.serverTime)));
         } catch {
           if (controller.signal.aborted) return;
           failures += 1;
           setConnectionLost(true);
         }
       }
-      const delay = Math.min(POLL_INTERVAL_MS * 2 ** failures, MAX_RETRY_DELAY_MS);
+      // Ended: nothing will change any more. Showing the page again still fetches once.
+      if (nextDelay === undefined) return;
+      const delay =
+        failures > 0 ? Math.min(POLL_INTERVAL_MS * 2 ** failures, MAX_RETRY_DELAY_MS) : nextDelay;
       timer = window.setTimeout(() => void poll(), delay);
     };
 

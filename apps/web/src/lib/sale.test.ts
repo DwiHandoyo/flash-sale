@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import type { Sale } from '../api';
-import { formatDuration, statusAt } from './sale';
+import { formatDuration, nextPollDelayMs, statusAt } from './sale';
 
 describe('statusAt', () => {
   const sale: Sale = {
@@ -29,6 +29,22 @@ describe('statusAt', () => {
     expect(statusAt({ ...sale, remainingStock: 0 }, at('2026-01-01T10:30:00.000Z'))).toBe(
       'sold_out',
     );
+  });
+});
+
+describe('nextPollDelayMs', () => {
+  it('polls every 2 s while the status can still change', () => {
+    expect(nextPollDelayMs('upcoming')).toBe(2_000);
+    expect(nextPollDelayMs('active')).toBe(2_000);
+    expect(nextPollDelayMs('paused')).toBe(2_000);
+  });
+
+  it('slows down once sold out, because only a rare recovery can release units', () => {
+    expect(nextPollDelayMs('sold_out')).toBe(30_000);
+  });
+
+  it('stops once the sale has ended, because nothing changes any more', () => {
+    expect(nextPollDelayMs('ended')).toBeUndefined();
   });
 });
 

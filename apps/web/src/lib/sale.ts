@@ -11,6 +11,17 @@ export function statusAt(sale: Sale, now: number): SaleStatus {
   return sale.remainingStock > 0 ? 'active' : 'sold_out';
 }
 
+/**
+ * How long to wait before asking for the status again. An ended sale never changes, so polling
+ * stops. A sold-out sale rarely does (recovery can release unconfirmed units), so it slows down to
+ * the CDN's cache time for that state (docs/07, D16).
+ */
+export function nextPollDelayMs(status: SaleStatus): number | undefined {
+  if (status === 'ended') return undefined;
+  if (status === 'sold_out') return 30_000;
+  return 2_000;
+}
+
 /** 3_725_000 → "01:02:05"; durations of a day or more get a "2d " prefix. */
 export function formatDuration(ms: number): string {
   const totalSeconds = Math.max(0, Math.ceil(ms / 1_000));
