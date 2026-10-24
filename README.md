@@ -125,7 +125,7 @@ npm run lint && npm run typecheck
 
 | Level       | Tests | Highlights                                                                                                                                                                                                                                                                                                           |
 | ----------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Unit        | 160   | Purchase rules, user ID normalisation, HTTP status codes, the shared contract test for both sale stores, the worker's de-duplication, recovery timing, every message the web app shows                                                                                                                               |
+| Unit        | 164   | Purchase rules, user ID normalisation, HTTP status codes, the shared contract test for both sale stores, the worker's de-duplication, recovery timing, every message the web app shows                                                                                                                               |
 | Integration | 34    | A naive "read, then decrement" version oversells under concurrency and the script does not; 300 concurrent HTTP buyers for 10 units get exactly 10 `201`s; a failed publish is completed on retry; the worker retries through a database outage and dead-letters bad data; recovery waits for orders still in flight |
 
 ## Stress test

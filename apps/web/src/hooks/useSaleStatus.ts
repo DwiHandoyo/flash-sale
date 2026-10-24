@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 
 import { fetchSale, type Sale } from '../api';
+import { updateClockEstimate, type ClockEstimate } from '../lib/clock';
 import { nextPollDelayMs, statusAt } from '../lib/sale';
 
 export interface SaleSnapshot {
@@ -14,12 +15,16 @@ const MAX_RETRY_DELAY_MS = 15_000;
 
 /**
  * Polls the sale status, backing off while the API is unreachable and pausing in hidden tabs. Polling
- * slows down once the sale is sold out and stops once it has ended.
+ * slows down once the sale is sold out and stops once it has ended. The clock offset only moves
+ * when a response proves a better one (see updateClockEstimate), so cached answers cannot make the
+ * countdown jump.
  */
 export function useSaleStatus() {
   const [snapshot, setSnapshot] = useState<SaleSnapshot | null>(null);
   const [connectionLost, setConnectionLost] = useState(false);
   const [generation, setGeneration] = useState(0);
+  // Kept across refreshes: a purchase refreshes the status, and must not reset the clock.
+  const clock = useRef<ClockEstimate | undefined>(undefined);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -29,12 +34,14 @@ export function useSaleStatus() {
     const poll = async () => {
       let nextDelay = nextPollDelayMs('active');
       if (!document.hidden) {
-        const sentAt = Date.now();
         try {
           const sale = await fetchSale(controller.signal);
-          // Assume the server stamped the response halfway through the round trip.
-          const clockOffsetMs = Date.parse(sale.serverTime) - (sentAt + Date.now()) / 2;
-          setSnapshot({ sale, clockOffsetMs });
+          clock.current = updateClockEstimate(
+            clock.current,
+            Date.parse(sale.serverTime),
+            Date.now(),
+          );
+          setSnapshot({ sale, clockOffsetMs: clock.current.offsetMs });
           setConnectionLost(false);
           failures = 0;
           nextDelay = nextPollDelayMs(statusAt(sale, Date.parse(sale.serverTime)));
@@ -62,7 +69,10 @@ export function useSaleStatus() {
 
   useEffect(() => {
     const onVisibilityChange = () => {
-      if (!document.hidden) refresh();
+      if (document.hidden) return;
+      // The device may have slept; measure the clock again from scratch.
+      clock.current = undefined;
+      refresh();
     };
     document.addEventListener('visibilitychange', onVisibilityChange);
     return () => document.removeEventListener('visibilitychange', onVisibilityChange);

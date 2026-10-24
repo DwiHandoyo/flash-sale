@@ -25,7 +25,7 @@
 ```
 
 - `status` is one of `upcoming`, `active`, `sold_out`, `ended` or `paused`.
-- `serverTime` lets the app run an accurate countdown even when the device clock is wrong. It and `status` come from the API server's clock; the purchase itself is decided by Redis's clock (see [Decisions](07-decisions.md), D6).
+- `serverTime` lets the app run an accurate countdown even when the device clock is wrong. A copy served by the CDN carries an older `serverTime`, so the app keeps the largest `serverTime − arrival time` it has seen: a stale copy can only lower that value and is ignored, and the countdown never jumps back. It and `status` come from the API server's clock; the purchase itself is decided by Redis's clock (see [Decisions](07-decisions.md), D6).
 - The response tells a CDN how long it may reuse it: `s-maxage` from 1 to 30 s, or `no-store`, depending on the sale's phase and remaining stock. Browsers always revalidate (`max-age=0`). See [Decisions](07-decisions.md), D16.
 
 ## POST /api/purchases

@@ -199,6 +199,7 @@ Terraform would be the choice for a multi-cloud setup.
 - The CDN absorbs the polling: thousands of users become about one request per edge location per cache period.
 - The time follows how soon the answer is likely to change. While the last units go, users watch the number, so the answer comes straight from the API. Once the sale is sold out or ended, nothing changes any more.
 - Before the opening the time stays at 1 s. The app unlocks the buy button from `serverTime`, so an older copy would unlock it later for some users than for others.
+- A cached answer carries an old `serverTime`. The app therefore never takes its clock from a single answer: it keeps the best lower bound of the server's clock (`serverTime − arrival time`), which a stale copy cannot raise, so the countdown does not jump when the CDN answers.
 - A paused sale is never cached, so it reopens for everyone at once after recovery.
 
 **Cost.**
