@@ -121,7 +121,7 @@ apps/api/src/
 
 ## Frontend
 
-- **Function components plus two custom hooks:** `useSaleStatus` polls the status, backs off on errors and pauses in hidden tabs. `useServerNow` runs the countdown from `serverTime`.
+- **Function components plus two custom hooks:** `useSaleStatus` polls the status, backs off on errors, pauses in hidden tabs, slows down once sold out and stops once the sale has ended. `useServerNow` runs the countdown from `serverTime`.
 - **One API client module.**
 - **One table that maps each response code to the message shown to the user.**
 - **No state library.**

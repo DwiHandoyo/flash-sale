@@ -13,7 +13,7 @@
 | D7  | Redis syncs every write to disk before replying                                                            | Syncing once per second                                    | A restart needs no recovery; cheap because only winners write                  |
 | D8  | One repository with a separate app per role (API, worker, jobs, web)                                       | One app doing everything, or microservices split by domain | Each app deploys and scales on its own; the rules stay together                |
 | D9  | Fastify for the API                                                                                        | Express, NestJS                                            | Fast, with built-in validation and little ceremony                             |
-| D10 | The app polls the sale status every 2 s                                                                    | WebSockets or server-sent events                           | Simple and cacheable                                                           |
+| D10 | The app polls the sale status every 2 s, every 30 s once sold out, and stops once the sale has ended       | WebSockets or server-sent events                           | Simple and cacheable                                                           |
 | D11 | Fail fast when overloaded                                                                                  | Queueing requests until they time out                      | Latency stays predictable and servers stay healthy                             |
 | D12 | The sale opens and closes by the clock, checked on every request                                           | A scheduler switching it on and off                        | Exact to the millisecond, with no job that can fail                            |
 | D13 | In production, workers run on Lambda and the API on containers scaled before the sale                      | Serverless everywhere, or containers everywhere            | Each part runs on what fits its load                                           |
@@ -119,6 +119,8 @@ NestJS adds structure (modules, dependency injection) that a three-endpoint serv
 
 **Why.** Each server answers status polls from a 0.5 s in-memory cache. Ten thousand users polling every 2 s therefore cost each server about 2 Redis reads per second, and a CDN could cache the response too.
 
+**When it slows down or stops.** An ended sale never changes, so the app stops polling; the switch to "ended" itself comes from the countdown, not from a poll. A sold-out sale changes only if recovery releases unconfirmed units, so the app polls every 30 s, the CDN's cache time for that state. Showing a hidden tab again always fetches once.
+
 **Cost.** The stock number on screen can be a couple of seconds old. The purchase itself is always checked live.
 
 ## D11. Fail fast when overloaded
@@ -197,6 +199,7 @@ Terraform would be the choice for a multi-cloud setup.
 - The CDN absorbs the polling: thousands of users become about one request per edge location per cache period.
 - The time follows how soon the answer is likely to change. While the last units go, users watch the number, so the answer comes straight from the API. Once the sale is sold out or ended, nothing changes any more.
 - Before the opening the time stays at 1 s. The app unlocks the buy button from `serverTime`, so an older copy would unlock it later for some users than for others.
+- A cached answer carries an old `serverTime`. The app therefore never takes its clock from a single answer: it keeps the best lower bound of the server's clock (`serverTime − arrival time`), which a stale copy cannot raise, so the countdown does not jump when the CDN answers.
 - A paused sale is never cached, so it reopens for everyone at once after recovery.
 
 **Cost.**
